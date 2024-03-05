@@ -1,0 +1,55 @@
+body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    overflow: hidden;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: -2;
+    background: linear-gradient(rgb(12, 82, 157), rgb(51, 139, 203)); 
+    /*rgb(51, 139, 203) */
+}
+
+body::after {
+    content: '';
+    position: absolute;
+    top: auto;
+    bottom: 0;
+    left: 75%;
+    background: url('assets/snowflake.svg') no-repeat;
+    background-size: contain;
+    width: 300px;
+    height: 300px;
+    z-index: -1;
+}
+
+
+
+xbody {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    background: url('assets/snowflake.svg') no-repeat, linear-gradient(rgb(12, 82, 157), rgb(51, 139, 203));
+    overflow: hidden;
+}
+
+.state {
+    text-transform: capitalize;
+}
+
+select {
+    width: 50%;
+}

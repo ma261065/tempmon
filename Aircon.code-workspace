@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../TestProject"
+		},
+		{
+			"name": "serial:/COM3",
+			"uri": "serial://com3/"
+		}
+	],
+	"settings": {}
+}

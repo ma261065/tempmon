@@ -33,7 +33,18 @@ body::after {
     z-index: -1;
 }
 
+.radial-gradient {
+    background: linear-gradient(rgb(13, 80, 148), rgb(76, 162, 222));
+  }
 
+.dot {
+    width: 10%;
+    padding-top: 10%;
+    background-color: #bbb;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  
 
 xbody {
     margin: 0;

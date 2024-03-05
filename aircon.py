@@ -6,7 +6,7 @@ from struct import unpack
 from umqttsimple import MQTTClient
 import machine, network, socket, ntptime, time
 import asyncio
-#import airtouch
+import airtouch
 import webserver
 import sys
 import webrepl
@@ -60,8 +60,8 @@ def timer_callback(timer):
         print(f"Humidity: {info['humidity']}%")
         print(f"Battery Level: {info['battery']}%")
         print(f"RSSI: {info['rssi']} dBm")
-        print(f"Voltage: {info["voltage"]}V")
-        print(f"Power: {info["power"]}")
+        print(f"Voltage: {info['voltage']}V")
+        print(f"Power: {info['power']}")
         print(f"Last Updated: {info['last_updated']}")
 
         # If the last updated is more than a hour ago, delete this record
@@ -202,25 +202,30 @@ def parse_adv_data(adv_data: bytes):
 
 
 def DiscoverAircon():
+    numtries = 5
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) #UDP
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.settimeout(10)   # 10 second timeout
+    sock.settimeout(2)   # 2 second timeout
     sock.bind(('0.0.0.0', 49200))
 
     address = ('255.255.255.255', 49200)
     message = b"HF-A11ASSISTHREAD"
 
-    try:
-        sock.sendto(message, address)
-
-        while True:
+    while numtries > 0:
+        try:
+            print("Trying")
+            sock.sendto(message, address)
             data, addr = sock.recvfrom(512)
+
             if data:
-                #print(f"Received: {data.decode()} from {addr}")
+                print(f"Received: {data.decode()} from {addr}")
                 sock.close()
                 break
-    except:
-        #print("No response received")
+        except:
+            print("No response received.")
+
+    if data is None:
+        print("No response received")
         return None
 
     t = tuple(data.decode().split(","))
@@ -250,6 +255,7 @@ def StartScan():
     BLE().active(True)
     BLE().irq(handle_scan)
     print("Starting scan for temperature sensors...")
+    #BLE().gap_scan(0, 1280000, 11250, True)  # Defaults
     BLE().gap_scan(0, 55_000, 25_250, True)  # scan often & indefinitely
 
 # Create a timer that triggers every 60 seconds to send MQTT messages
@@ -301,5 +307,6 @@ try:
         await asyncio.gather(task1, task2)
 
     asyncio.run(__async_main())
-except:
+except Exception as e:
+    print("Exception:", e)
     exit_handler()

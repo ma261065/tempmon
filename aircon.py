@@ -308,5 +308,5 @@ try:
 
     asyncio.run(__async_main())
 except Exception as e:
-    print("Exception: ", e)
+    print("Exception:", e)
     exit_handler()

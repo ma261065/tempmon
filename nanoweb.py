@@ -29,24 +29,28 @@ class Request:
 
 
 async def write(request, data):
-    await request.write(
+    await request.write.awrite(
         data.encode('ISO-8859-1') if type(data) == str else data
     )
+    await request.write.drain()
 
 
 async def error(request, code, reason):
-    await request.write("HTTP/1.1 %s %s\r\n\r\n" % (code, reason))
-    await request.write("<h1>%s</h1>" % (reason))
+    await request.write.awrite("HTTP/1.1 %s %s\r\n\r\n" % (code, reason))
+    await request.write.awrite("<h1>%s</h1>" % (reason))
+    await request.write.drain()
 
 
 async def send_file(request, filename, segment=64, binary=False):
     try:
+        print("Sending", filename)
         with open(filename, 'rb' if binary else 'r') as f:
             while True:
                 data = f.read(segment)
                 if not data:
                     break
-                await request.write(data)
+                await request.write.awrite(data)
+                await request.write.drain()
     except OSError as e:
         if e.args[0] != uerrno.ENOENT:
             raise
@@ -91,7 +95,6 @@ class Nanoweb:
         while True:
             if isinstance(handler, dict):
                 handler = (request.url, handler)
-
             if isinstance(handler, str):
                 await write(request, "HTTP/1.1 200 OK\r\n\r\n")
                 await send_file(request, handler)
@@ -123,10 +126,11 @@ class Nanoweb:
 
         request = Request()
         request.read = reader.read
-        request.write = writer.awrite
+        request.write = writer
         request.close = writer.aclose
 
         request.method, request.url, version = items
+        print("Serve:", request.url)
 
         try:
             try:
@@ -188,8 +192,15 @@ class Nanoweb:
         except OSError as e:
             # Skip ECONNRESET error (client abort request)
             if e.args[0] != uerrno.ECONNRESET:
+                print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&", e)
                 raise
+            else:
+                print("********************************************", e)
+                await writer.aclose()
+
+
         finally:
+            print("Closing socket")
             await writer.aclose()
 
     async def run(self):

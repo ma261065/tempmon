@@ -1,1 +1,1 @@
-PASS = 'local151'
+PASS = 'password'

@@ -1,63 +1,709 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
     <head>
         <meta charset="utf-8">
-        <script src="https://code.jquery.com/jquery-2.2.4.min.js" integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=" crossorigin="anonymous"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
-        <!--link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"-->
-        <link rel="stylesheet" href="default.css">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Temperature Monitor</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <!-- Day.js and plugins -->
+        <script src="https://unpkg.com/dayjs/dayjs.min.js"></script>
+        <script src="https://unpkg.com/dayjs/plugin/customParseFormat.js"></script>
+        <script src="https://unpkg.com/dayjs/plugin/duration.js"></script>
+        <script src="https://unpkg.com/dayjs/plugin/isSameOrAfter.js"></script>
+        <script>
+            dayjs.extend(window.dayjs_plugin_customParseFormat);
+            dayjs.extend(window.dayjs_plugin_duration);
+            dayjs.extend(window.dayjs_plugin_isSameOrAfter);
+        </script>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #0c0c0c 0%, #1a1a1a 50%, #0f0f0f 100%);
+                color: #e0e0e0;
+                min-height: 100vh;
+                line-height: 1.6;
+            }
+
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+
+            .header {
+                background: rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                padding: 30px;
+                margin-bottom: 30px;
+                text-align: center;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+
+            .header h1 {
+                font-size: 2.5rem;
+                font-weight: 300;
+                margin-bottom: 10px;
+                background: linear-gradient(45deg, #4fc3f7, #29b6f6, #03a9f4);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 15px;
+            }
+
+            .header .subtitle {
+                font-size: 1.1rem;
+                color: #888;
+                font-weight: 300;
+            }
+
+            .dashboard {
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 30px;
+                margin-bottom: 30px;
+            }
+
+            .chart-container {
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                padding: 30px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                position: relative;
+            }
+
+            .chart-container h2 {
+                font-size: 1.3rem;
+                font-weight: 400;
+                margin-bottom: 20px;
+                color: #fff;
+                text-align: center;
+            }
+
+            .chart-wrapper {
+                position: relative;
+                height: 300px;
+                width: 100%;
+            }
+
+            .temperature-overlay {
+                position: absolute;
+                top: 8px;
+                left: 60px;
+                z-index: 10;
+                font-size: 2.5rem;
+                font-weight: 300;
+                color: rgba(79, 195, 247, 0.9);
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+
+            .temperature-overlay .temp-value {
+                display: inline;
+                line-height: 1;
+            }
+
+            .temperature-overlay .temp-unit {
+                font-size: 1.2rem;
+                opacity: 0.8;
+                margin-left: 2px;
+            }
+
+            .info-panel {
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                padding: 30px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+
+            .info-panel h2 {
+                font-size: 1.3rem;
+                font-weight: 400;
+                margin-bottom: 20px;
+                color: #fff;
+                border-bottom: 2px solid rgba(79, 195, 247, 0.3);
+                padding-bottom: 10px;
+            }
+
+            .info-grid {
+                display: grid;
+                gap: 15px;
+            }
+
+            .info-item {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                padding: 15px;
+                transition: all 0.3s ease;
+            }
+
+            .info-item:hover {
+                background: rgba(255, 255, 255, 0.08);
+                transform: translateY(-2px);
+            }
+
+            .info-item .label {
+                font-size: 0.85rem;
+                color: #888;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 5px;
+            }
+
+            .info-item .value {
+                font-size: 1.1rem;
+                color: #fff;
+                font-weight: 500;
+            }
+
+            .status-indicator {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #4caf50;
+                margin-right: 8px;
+                animation: pulse 2s infinite;
+            }
+
+            @keyframes pulse {
+                0% { opacity: 1; }
+                50% { opacity: 0.5; }
+                100% { opacity: 1; }
+            }
+
+            .footer {
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                padding: 20px;
+                text-align: center;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+
+            .footer p {
+                color: #888;
+                font-size: 0.9rem;
+            }
+
+            @media (max-width: 768px) {
+                .dashboard {
+                    grid-template-columns: 1fr;
+                }
+                
+                .header h1 {
+                    font-size: 2rem;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                
+                .container {
+                    padding: 15px;
+                }
+            }
+        </style>
     </head>
 
     <body>
-        <h1>Aircon Controller
-        <img src="/assets/python-logo.png">
-        </h1>
+        <div class="container">
+            <header class="header">
+                <h1>
+                    <img src="thermo.svg" alt="Thermometer">
+                    Temperature Monitor
+                </h1>
+                <p class="subtitle">Real-time environmental monitoring dashboard</p>
+            </header>
 
-        <span class="dot radial-gradient"></span>
+            <div class="dashboard">
+                <div class="chart-container">
+                    <div class="temperature-overlay">
+                        <span class="temp-value" id="currentTemp">--.-</span><span class="temp-unit">°C</span>
+                    </div>
+                    <h2>Parent's Bedroom</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="temperatureChart"></canvas>
+                    </div>
+                </div>
 
-        <h2>1. File list</h2>
+                <div class="info-panel">
+                    <h2>System Information</h2>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="label">Status</div>
+                            <div class="value">
+                                <span class="status-indicator"></span>
+                                Online
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <div class="label">Current Time</div>
+                            <div class="value" id="time">{time}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="label">System Uptime</div>
+                            <div class="value" id="uptime">{uptime}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-        <p class="alert alert-info" role="alert">
-            List is updated when you upload a file.
-        </p>
-
-        <form id="list">
-            <select multiple></select>
-
-            <br>
-
-            <input class="btn btn-primary mt-2" type="submit" name="download" value="Download">
-        </form>
-
-        <h2>2. Upload</h2>
-
-        <p class="alert alert-info" role="alert">
-            Select one or more files and upload them.
-        </p>
-
-        <form id="upload" action="/api/upload/" method="POST">
-            <label for="files">Files to upload:</label>
-            <input id="files" name="files" type="file" multiple>
-            <br>
-            <input type="submit" value="Upload">
-        </form>
-
-        <div id="status" class="alert alert-primary" role="alert">
-            N/A
+            <footer class="footer">
+                <p>Data updates every minute • Chart displays 24-hour rolling window • Automatically loads historical data when needed</p>
+            </footer>
         </div>
+        
+        <script>
+            console.log("=== TEMPERATURE MONITOR INITIALIZATION ===");
+            console.log("System startup at:", new Date().toLocaleString());
+            
+            const ctx = document.getElementById('temperatureChart');
+            const DISPLAY_DATA_POINTS = 289; // 0–288
+            const INTERVAL_MINUTES = 5;
 
-        <h2>3. Information</h2>
+            // Store data points with their timestamps for proper repositioning
+            let dataPoints = new Map(); // timestamp -> {value, dayjs_obj}
 
-        <p class="alert alert-info" role="alert">
-            Information is polled each second to the status API.
-        </p>
+            // Rolling window positioning - data moves with time
+            function getDataIndexForTime(timeString) {
+                console.log("=== CALCULATING DATA INDEX ===");
+                const now = dayjs();
+                const today = now.format('YYYY-MM-DD');
+                let dataTime = dayjs(`${today} ${timeString}`, 'YYYY-MM-DD HH:mm');
+                
+                if (dataTime.isAfter(now)) {
+                    dataTime = dataTime.subtract(1, 'day');
+                }
+                
+                const nextFullHour = dayjs(now).add(1, 'hour').startOf('hour');
+                const windowStart = nextFullHour.subtract(24, 'hours');
+                const minutesFromWindowStart = dataTime.diff(windowStart, 'minute', true);
+                const index = Math.floor(minutesFromWindowStart / INTERVAL_MINUTES);
+                
+                console.log("Data time:", dataTime.format('YYYY-MM-DD HH:mm'));
+                console.log("Window start:", windowStart.format('YYYY-MM-DD HH:mm'));
+                console.log("Minutes from window start:", minutesFromWindowStart);
+                console.log("Calculated index:", index);
+                
+                return {
+                    index: Math.max(0, Math.min(index, 288)),
+                    dataTime: dataTime,
+                    windowStart: windowStart
+                };
+            }
 
-        <ul>
-            <li>Time: <span id="time">{time}</span></li>
-            <li>Uptime: <span id="uptime">{uptime}</span></li>
-            <li>Python: <span id="python">{python}</span></li>
-            <li>Platform: <span id="platform">{platform}</span></li>
-        </ul>
-       
+            // Generate complete rolling labels
+            function generateRollingLabels() {
+                console.log("=== GENERATING ROLLING LABELS ===");
+                const labels = [];
+                const now = dayjs();
+                const nextFullHour = dayjs(now).add(1, 'hour').startOf('hour');
+                const windowStart = nextFullHour.subtract(24, 'hours');
+                
+                for (let i = 0; i < DISPLAY_DATA_POINTS; i++) {
+                    labels.push(windowStart.add(i * INTERVAL_MINUTES, 'minute').format('HH:mm'));
+                }
+                
+                console.log("Window start:", windowStart.format('YYYY-MM-DD HH:mm'));
+                console.log("Generated labels - first 5:", labels.slice(0, 5));
+                console.log("Generated labels - last 5:", labels.slice(-5));
+                
+                return labels;
+            }
+
+            // Rebuild data array from stored data points based on current time window
+            function rebuildDataArray() {
+                console.log("=== REBUILDING DATA ARRAY ===");
+                const now = dayjs();
+                const nextFullHour = dayjs(now).add(1, 'hour').startOf('hour');
+                const windowStart = nextFullHour.subtract(24, 'hours');
+                const windowEnd = nextFullHour;
+                
+                const newData = new Array(DISPLAY_DATA_POINTS).fill(null);
+                
+                // Filter and reposition data points that fall within the current window
+                for (const [timestamp, dataPoint] of dataPoints.entries()) {
+                    if (dataPoint.dayjs_obj.isSameOrAfter(windowStart) && dataPoint.dayjs_obj.isBefore(windowEnd)) {
+                        const minutesFromWindowStart = dataPoint.dayjs_obj.diff(windowStart, 'minute', true);
+                        const index = Math.floor(minutesFromWindowStart / INTERVAL_MINUTES);
+                        
+                        if (index >= 0 && index < DISPLAY_DATA_POINTS) {
+                            newData[index] = dataPoint.value;
+                            console.log(`Repositioned data: ${timestamp} -> index ${index}, value ${dataPoint.value}`);
+                        }
+                    } else {
+                        // Remove data points that are now outside the window
+                        console.log(`Removing old data point: ${timestamp}`);
+                        dataPoints.delete(timestamp);
+                    }
+                }
+                
+                console.log(`Active data points: ${dataPoints.size}`);
+                return newData;
+            }
+
+            // === Chart Initialization ===
+            let rollingLabels = generateRollingLabels(); 
+            const cc = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: rollingLabels,
+                    datasets: [{
+                        label: 'Temperature',
+                        data: new Array(DISPLAY_DATA_POINTS).fill(null),
+                        borderColor: 'rgba(79, 195, 247, 1)',
+                        backgroundColor: 'rgba(79, 195, 247, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        spanGaps: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: { display: false },
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: (context) => context.index % 36 === 0 
+                                    ? 'rgba(255, 255, 255, 0.1)' 
+                                    : 'transparent'
+                            },
+                            ticks: {
+                                autoSkip: false,
+                                callback: (value, index) => index % 36 === 0 ? rollingLabels[index] : '',
+                                minRotation: 45,
+                                maxRotation: 45,
+                                color: '#888'
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            min: 12,
+                            max: 28,
+                            ticks: { 
+                                color: '#888',
+                                callback: (value) => value + '°C'
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        intersect: false
+                    }
+                }
+            });
+
+            let lastUpdatedHour = dayjs().hour();
+
+            function updateLabelsToCurrentTime() {
+                const now = dayjs();
+                const currentHour = now.hour();
+                
+                console.log("=== LABEL UPDATE CHECK ===", now.format('HH:mm:ss'));
+                
+                if (currentHour !== lastUpdatedHour) {
+                    console.log("🕐 Hour changed:", lastUpdatedHour, "→", currentHour);
+                    lastUpdatedHour = currentHour;
+                    
+                    // Generate new labels
+                    const newRollingLabels = generateRollingLabels();
+                    
+                    // Rebuild data array with proper positioning
+                    const newDataArray = rebuildDataArray();
+                    
+                    // Update chart
+                    rollingLabels = newRollingLabels;
+                    cc.data.labels = rollingLabels;
+                    cc.data.datasets[0].data = newDataArray;
+                    
+                    cc.update('none');
+                    console.log("✅ Rolling window update complete with data repositioning");
+                }
+            }
+
+            function ProcessData(item) {
+                console.log("=== PROCESSING NEW DATA ===", item);
+                try {
+                    const newData = JSON.parse(item);
+                    const result = getDataIndexForTime(newData.time);
+                    const dataIndex = result.index;
+                    
+                    if (dataIndex >= 0 && dataIndex < DISPLAY_DATA_POINTS) {
+                        const newValue = parseFloat(newData.temperature);
+                        const timestamp = result.dataTime.format('YYYY-MM-DD HH:mm');
+                        
+                        // Store in our data points map for repositioning during window shifts
+                        dataPoints.set(timestamp, {
+                            value: newValue,
+                            dayjs_obj: result.dataTime
+                        });
+                        
+                        // Update chart data
+                        cc.data.datasets[0].data[dataIndex] = newValue;
+
+                        // Update the large temperature overlay
+                        const tempElement = document.getElementById('currentTemp');
+                        if (tempElement) {
+                            tempElement.textContent = newValue.toFixed(1);
+                        }
+
+                        cc.update('none');
+                        cc.setActiveElements([]);
+                        cc.tooltip.setActiveElements([], {x: 0, y: 0});
+                        console.log("✅ Data updated at index", dataIndex, ":", newValue, "timestamp:", timestamp);
+                    } else {
+                        console.log("⚠ INDEX OUT OF RANGE:", dataIndex);
+                    }
+                } catch (error) {
+                    console.error("⚠ Error processing data:", error);
+                }
+            }
+
+            // Check if we need to fetch historical data
+            function needsHistoricalData() {
+                const now = dayjs();
+                const recentThreshold = now.subtract(10, 'minutes'); // Consider data "recent" if within 10 minutes
+                
+                // Check if we have any recent data points
+                let hasRecentData = false;
+                for (const [timestamp, dataPoint] of dataPoints.entries()) {
+                    if (dataPoint.dayjs_obj.isAfter(recentThreshold)) {
+                        hasRecentData = true;
+                        break;
+                    }
+                }
+                
+                console.log("=== CHECKING FOR MISSING DATA ===");
+                console.log("Data points stored:", dataPoints.size);
+                console.log("Has recent data (last 10 min):", hasRecentData);
+                
+                return !hasRecentData;
+            }
+
+            // Fetch and process historical data from server
+            async function fetchHistoricalData() {
+                console.log("=== FETCHING HISTORICAL DATA ===");
+                try {
+                    const response = await fetch("/api/history");
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    
+                    // First get the raw text to see what we're receiving
+                    const responseText = await response.text();
+                    console.log("Raw response:", responseText);
+                    
+                    // Try to parse as JSON
+                    let historicalData;
+                    try {
+                        historicalData = JSON.parse(responseText);
+                    } catch (parseError) {
+                        console.error("JSON parse error:", parseError);
+                        console.error("Response was:", responseText);
+                        return;
+                    }
+                    
+                    console.log("Parsed historical data:", historicalData);
+                    console.log("Type of historicalData:", typeof historicalData);
+                    console.log("Is array:", Array.isArray(historicalData));
+                    
+                    // Check if it's an array
+                    if (!Array.isArray(historicalData)) {
+                        console.error("Expected array but got:", typeof historicalData, historicalData);
+                        return;
+                    }
+                    
+                    console.log("Received historical data points:", historicalData.length);
+                    
+                    if (historicalData.length === 0) {
+                        console.log("No historical data available from server");
+                        return;
+                    }
+                    
+                    // Clear existing data and rebuild from historical data
+                    dataPoints.clear();
+                    
+                    // Process each historical data point
+                    let processedCount = 0;
+                    let oldestTime = null;
+                    let newestTime = null;
+                    
+                    for (const dataPoint of historicalData) {
+                        try {
+                            // Expecting format: {time: "HH:mm", temperature: "20.5", date: "YYYY-MM-DD"} 
+                            // or simpler: {time: "HH:mm", temperature: "20.5"} (assumes today)
+                            const dateStr = dataPoint.date || dayjs().format('YYYY-MM-DD');
+                            const dataTime = dayjs(`${dateStr} ${dataPoint.time}`, 'YYYY-MM-DD HH:mm');
+                            const timestamp = dataTime.format('YYYY-MM-DD HH:mm');
+                            const temperature = parseFloat(dataPoint.temperature);
+                            
+                            if (!isNaN(temperature)) {
+                                dataPoints.set(timestamp, {
+                                    value: temperature,
+                                    dayjs_obj: dataTime
+                                });
+                                processedCount++;
+                                
+                                if (!oldestTime || dataTime.isBefore(oldestTime)) {
+                                    oldestTime = dataTime;
+                                }
+                                if (!newestTime || dataTime.isAfter(newestTime)) {
+                                    newestTime = dataTime;
+                                }
+                            }
+                        } catch (error) {
+                            console.warn("Error processing historical data point:", dataPoint, error);
+                        }
+                    }
+                    
+                    console.log(`Successfully processed ${processedCount} historical data points`);
+                    if (oldestTime && newestTime) {
+                        console.log(`Data range: ${oldestTime.format('YYYY-MM-DD HH:mm')} to ${newestTime.format('YYYY-MM-DD HH:mm')}`);
+                        console.log(`Coverage: ${newestTime.diff(oldestTime, 'hour', true).toFixed(1)} hours`);
+                    }
+                    
+                    // Rebuild the chart with historical data
+                    const newDataArray = rebuildDataArray();
+                    cc.data.datasets[0].data = newDataArray;
+                    
+                    // Update current temperature display with most recent value
+                    if (newestTime) {
+                        const newestTimestamp = newestTime.format('YYYY-MM-DD HH:mm');
+                        const newestValue = dataPoints.get(newestTimestamp);
+                        if (newestValue) {
+                            const tempElement = document.getElementById('currentTemp');
+                            if (tempElement) {
+                                tempElement.textContent = newestValue.value.toFixed(1);
+                            }
+                        }
+                    }
+                    
+                    cc.update('none');
+                    console.log("✅ Historical data loaded and chart updated");
+                    
+                } catch (err) {
+                    console.error("⚠ Failed to fetch historical data:", err);
+                }
+            }
+
+            // Enhanced polling with gap detection
+            async function pollData() {
+                console.log("=== NETWORK POLLING ===", new Date().toLocaleTimeString());
+                try {
+                    const response = await fetch("/tempdata");
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const text = await response.text();
+                    ProcessData(text);
+                } catch (err) {
+                    console.error("⚠ TempData request failed:", err);
+                }
+            }
+
+            // Status updates every second
+            async function updateStatus() {
+                try {
+                    const response = await fetch("/api/status");
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`); 
+                        const data = await response.json();
+                        // Update all status fields
+                        ['time', 'uptime'].forEach(key => {
+                            const element = document.getElementById(key);
+                            if (element && data[key]) {
+                                element.textContent = data[key];
+                            }
+                        });
+                } catch (err) {
+                    console.error("⚠ Status request failed:", err);
+                }
+            }
+
+            // === Scheduling system for label updates ===
+            function scheduleLabelUpdate() {
+                const now = new Date();
+                const msUntilNextHour = (60 - now.getMinutes()) * 60000
+                                      - now.getSeconds() * 1000
+                                      - now.getMilliseconds();
+
+                console.log("Next label update scheduled in", (msUntilNextHour / 1000).toFixed(1), "seconds");
+
+                setTimeout(() => {
+                    updateLabelsToCurrentTime();
+                    scheduleLabelUpdate(); // reschedule for the following hour
+                }, msUntilNextHour);
+            }
+
+            // Initialize the application
+            async function initializeApp() {
+                console.log("=== INITIALIZING APPLICATION ===");
+                
+                // Update labels first
+                updateLabelsToCurrentTime();
+                
+                // Check if we need historical data and fetch it
+                if (needsHistoricalData()) {
+                    await fetchHistoricalData();
+                } else {
+                    console.log("Recent data detected, skipping historical fetch");
+                }
+                
+                console.log("=== INITIALIZATION COMPLETE ===");
+            }
+
+            // Run initialization after a short delay
+            setTimeout(initializeApp, 2000);
+
+            // Kick off hourly scheduling
+            scheduleLabelUpdate();
+
+            // Catch tab wake-up events and check for missing data
+            document.addEventListener("visibilitychange", async () => {
+                if (document.visibilityState === "visible") {
+                    console.log("🔄 Tab became visible – checking for missing data");
+                    updateLabelsToCurrentTime();
+                    
+                    // If we've been away for a while, we might need to fetch historical data
+                    if (needsHistoricalData()) {
+                        console.log("📥 Tab was sleeping, fetching missed data");
+                        await fetchHistoricalData();
+                    }
+                }
+            });
+
+            // Polling for new temperature data (every minute)
+            setInterval(pollData, 60000);
+
+            // Update status every second
+            setInterval(updateStatus, 1000);
+
+            // Periodic check for data gaps (every 5 minutes)
+            setInterval(async () => {
+                if (needsHistoricalData()) {
+                    console.log("🔍 Periodic check detected missing data, fetching history");
+                    await fetchHistoricalData();
+                }
+            }, 5 * 60000);
+        </script>
+
         <script src="default.js"></script>
     </body>
 </html>

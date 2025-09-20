@@ -16,8 +16,8 @@ body::before {
     bottom: 0;
     left: 0;
     z-index: -2;
-    background: linear-gradient(rgb(12, 82, 157), rgb(51, 139, 203)); 
-    /*rgb(51, 139, 203) */
+    background: linear-gradient(rgb(12, 82, 157), rgb(51, 139, 203));
+    /*rgb(51, 139, 203);*/
 }
 
 body::after {

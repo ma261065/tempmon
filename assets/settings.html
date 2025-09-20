@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings Page</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .panel {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            width: 300px;
+        }
+        .panel h2 {
+            margin-top: 0;
+        }
+        .setting {
+            margin-bottom: 15px;
+        }
+        .setting label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .setting input, .setting select {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 5px;
+            background-color: #333;
+            color: #fff;
+            box-sizing: border-box;
+        }
+        .save-button {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #6200ea;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .save-button:hover {
+            background-color: #3700b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="panel">
+            <h2>Panel 1</h2>
+            <div class="setting">
+                <label for="setting1">Setting 1</label>
+                <input type="text" id="setting1" name="setting1">
+            </div>
+            <div class="setting">
+                <label for="setting2">Setting 2</label>
+                <select id="setting2" name="setting2">
+                    <option value="option1">Option 1</option>
+                    <option value="option2">Option 2</option>
+                    <option value="option3">Option 3</option>
+                </select>
+            </div>
+            <div class="setting">
+                <label for="setting3">Setting 3</label>
+                <input type="text" id="setting3" name="setting3">
+            </div>
+            <button class="save-button">Save</button>
+        </div>
+        <div class="panel">
+            <h2>Panel 2</h2>
+            <div class="setting">
+                <label for="setting4">Setting 4</label>
+                <select id="setting4" name="setting4">
+                    <option value="option1">Option 1</option>
+                    <option value="option2">Option 2</option>
+                    <option value="option3">Option 3</option>
+                </select>
+            </div>
+            <div class="setting">
+                <label for="setting5">Setting 5</label>
+                <input type="text" id="setting5" name="setting5">
+            </div>
+            <div class="setting">
+                <label for="setting6">Setting 6</label>
+                <input type="text" id="setting6" name="setting6">
+            </div>
+            <button class="save-button">Save</button>
+        </div>
+    </div>
+</body>
+</html>

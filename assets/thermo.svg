@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 15 46" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <linearGradient id="cartoonMercury" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff6666"/>
+      <stop offset="100%" stop-color="#ff0000"/>
+    </linearGradient>
+
+    <linearGradient id="cartoonHighlight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer outline (grey) -->
+  <g>
+    <rect x="3.6" y="1.2" width="5.6" height="31" rx="2.8"
+          fill="none" stroke="#888" stroke-width="1.2"/>
+    <circle cx="6.4" cy="36" r="6.8" fill="none" stroke="#888" stroke-width="1.2"/>
+  </g>
+
+  <!-- White band (spacer) perfectly centred -->
+  <g>
+    <rect x="4.0" y="1.8" width="4.8" height="32" rx="2.2" fill="white"/>
+    <circle cx="6.4" cy="36" r="6" fill="white"/>
+  </g>
+
+  <!-- Inner outline -->
+  <g>
+    <rect x="4.8" y="2.8" width="3.2" height="28.4" rx="1.6"
+          fill="#fff" stroke="#333" stroke-width="0.5"/>
+    <circle cx="6.4" cy="36" r="4.8" fill="#fff" stroke="#333" stroke-width="0.5"/>
+  </g>
+
+  <!-- Mercury fill (stem + bulb) -->
+  <rect x="4.8" y="16" width="3.2" height="16.6" rx="1.6"
+        fill="url(#cartoonMercury)" stroke="#cc0000" stroke-width="0.5"/>
+  <circle cx="6.4" cy="36" r="4.4"
+          fill="url(#cartoonMercury)" stroke="#cc0000" stroke-width="0.5"/>
+
+  <!-- Shine on bulb -->
+  <ellipse cx="5.2" cy="34" rx="1.6" ry="2.4" fill="url(#cartoonHighlight)"/>
+
+  <!-- Shine on stem -->
+  <rect x="5.8" y="3.2" width="0.6" height="26" rx="0.3" fill="url(#cartoonHighlight)"/>
+
+  <!-- Tick marks (grey) -->
+  <g fill="#888">
+    <circle cx="11" cy="6" r="0.6"/>
+    <circle cx="11" cy="11" r="0.6"/>
+    <circle cx="11" cy="16" r="0.6"/>
+    <circle cx="11" cy="21" r="0.6"/>
+    <circle cx="11" cy="26" r="0.6"/>
+  </g>
+</svg>

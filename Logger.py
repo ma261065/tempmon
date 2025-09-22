@@ -1,5 +1,20 @@
+# Drop-in replacement for TemperatureLogger with memory optimizations
 import struct
 import time
+
+class SensorReading:
+    """Memory-efficient sensor reading using slots"""
+    __slots__ = ['temperature', 'humidity', 'battery_level', 'rssi', 'voltage', 'power', 'last_updated']
+    
+    def __init__(self, temperature=0.0, humidity=None, battery_level=None, 
+                 rssi=None, voltage=None, power=None, last_updated=0.0):
+        self.temperature = temperature
+        self.humidity = humidity
+        self.battery_level = battery_level
+        self.rssi = rssi
+        self.voltage = voltage
+        self.power = power
+        self.last_updated = last_updated
 
 class TemperatureLogger:
     def __init__(self, max_readings=2880, min_interval_minutes=5):
@@ -12,6 +27,7 @@ class TemperatureLogger:
         """
         self.record_size = 5
         self.max_readings = max_readings
+        self.max_sensors = 256  # Fixed maximum to prevent unbounded growth
         buffer_size = max_readings * self.record_size
         
         # Custom ring buffer using bytearray
@@ -23,16 +39,23 @@ class TemperatureLogger:
         self.start_time = time.time()
         self.min_interval_seconds = min_interval_minutes * 60
         
-        # Dynamic sensor tracking
-        self.name_to_id = {}      # sensor_name -> sensor_id
-        self.id_to_name = {}      # sensor_id -> sensor_name
+        # OPTIMIZED: Pre-allocated arrays instead of growing dictionaries
+        self.sensor_names = [None] * self.max_sensors  # Pre-allocated array
+        self.last_stored_time_array = [0.0] * self.max_sensors  # Pre-allocated array
+        self.detailed_readings_array = [None] * self.max_sensors  # Pre-allocated array
+        
+        # Keep minimal lookup dict for compatibility
+        self.name_to_id = {}      # sensor_name -> sensor_id (much smaller now)
+        self.id_to_name = {}      # Keep for compatibility but use array lookup
         self.next_sensor_id = 0   # Next available sensor ID
         
-        # Track last STORAGE time for each sensor (not just last received)
-        self.last_stored_time = {}  # sensor_name -> timestamp when last stored
+        # Legacy compatibility properties (now backed by arrays)
+        self.last_stored_time = {}  # Will be populated on-demand for compatibility
+        self.last_detailed_readings = {}  # Will be populated on-demand for compatibility
         
-        # NEW: Store detailed information for the last reading from each sensor
-        self.last_detailed_readings = {}  # sensor_name -> detailed_info_dict
+        # Reusable objects to avoid allocations
+        self._temp_records = []
+        self._temp_result = {}
         
         print(f"Custom ring buffer initialized: {max_readings} readings, {buffer_size} bytes")
         print(f"Min interval: {min_interval_minutes} minutes per sensor (latest-wins)")
@@ -42,12 +65,13 @@ class TemperatureLogger:
         if sensor_name in self.name_to_id:
             return self.name_to_id[sensor_name]
         
-        if self.next_sensor_id > 255:
-            raise ValueError("Maximum 256 sensors supported")
+        if self.next_sensor_id >= self.max_sensors:
+            raise ValueError(f"Maximum {self.max_sensors} sensors supported")
         
         sensor_id = self.next_sensor_id
         self.name_to_id[sensor_name] = sensor_id
-        self.id_to_name[sensor_id] = sensor_name
+        self.id_to_name[sensor_id] = sensor_name  # Keep for compatibility
+        self.sensor_names[sensor_id] = sensor_name  # Store in array too
         self.next_sensor_id += 1
         
         print(f"New sensor registered: '{sensor_name}' -> ID {sensor_id}")
@@ -60,21 +84,22 @@ class TemperatureLogger:
         - Otherwise, update the existing reading in place
         """
         current_time = time.time()
+        sensor_id = self._get_or_create_sensor_id(sensor_name)
         
-        # Check when we last STORED a reading for this sensor
-        last_storage_time = self.last_stored_time.get(sensor_name, 0)
+        # Check when we last STORED a reading for this sensor (use array)
+        last_storage_time = self.last_stored_time_array[sensor_id]
         time_since_last_storage = current_time - last_storage_time
         
         if time_since_last_storage >= self.min_interval_seconds:
             # Store as new reading
             self._store_new_reading(sensor_name, temperature, current_time)
-            self.last_stored_time[sensor_name] = current_time
+            self.last_stored_time_array[sensor_id] = current_time
         else:
             # Update existing reading in place
             if not self._update_existing_reading(sensor_name, temperature, current_time):
                 # Fallback: store as new if update failed
                 self._store_new_reading(sensor_name, temperature, current_time)
-                self.last_stored_time[sensor_name] = current_time
+                self.last_stored_time_array[sensor_id] = current_time
         
         return True
     
@@ -84,15 +109,6 @@ class TemperatureLogger:
         Add a detailed reading with additional sensor information.
         This will store the temperature in the ring buffer (following normal interval rules)
         AND store all detailed info for the last reading.
-        
-        Args:
-            sensor_name: Name of the sensor
-            temperature: Temperature reading (required)
-            humidity: Humidity percentage (optional)
-            battery_level: Battery level percentage (optional)
-            rssi: Signal strength in dBm (optional)
-            voltage: Voltage reading (optional)
-            power: Power reading (optional)
         """
         current_time = time.time()
         
@@ -102,18 +118,22 @@ class TemperatureLogger:
         # Get or create sensor ID for detailed storage
         sensor_id = self._get_or_create_sensor_id(sensor_name)
         
-        # Always update the detailed last reading (no interval restrictions)
-        self.last_detailed_readings[sensor_name] = {
-            'sensor_id': sensor_id,
-            'sensor_name': sensor_name,
-            'temperature': temperature,
-            'humidity': humidity,
-            'battery_level': battery_level,
-            'rssi': rssi,
-            'voltage': voltage,
-            'power': power,
-            'last_updated': current_time
-        }
+        # OPTIMIZED: Reuse existing SensorReading object if possible
+        existing_reading = self.detailed_readings_array[sensor_id]
+        if existing_reading is None:
+            # Only allocate new object if none exists
+            self.detailed_readings_array[sensor_id] = SensorReading(
+                temperature, humidity, battery_level, rssi, voltage, power, current_time
+            )
+        else:
+            # Reuse existing object - no allocation!
+            existing_reading.temperature = temperature
+            existing_reading.humidity = humidity
+            existing_reading.battery_level = battery_level
+            existing_reading.rssi = rssi
+            existing_reading.voltage = voltage
+            existing_reading.power = power
+            existing_reading.last_updated = current_time
         
         return True
     
@@ -124,7 +144,26 @@ class TemperatureLogger:
         Returns:
             Dict with detailed sensor info or None if sensor not found
         """
-        return self.last_detailed_readings.get(sensor_name)
+        if sensor_name not in self.name_to_id:
+            return None
+            
+        sensor_id = self.name_to_id[sensor_name]
+        reading = self.detailed_readings_array[sensor_id]
+        
+        if reading is None:
+            return None
+            
+        return {
+            'sensor_id': sensor_id,
+            'sensor_name': sensor_name,
+            'temperature': reading.temperature,
+            'humidity': reading.humidity,
+            'battery_level': reading.battery_level,
+            'rssi': reading.rssi,
+            'voltage': reading.voltage,
+            'power': reading.power,
+            'last_updated': reading.last_updated
+        }
     
     def get_all_last_detailed_readings(self):
         """
@@ -133,7 +172,27 @@ class TemperatureLogger:
         Returns:
             Dict: {sensor_name: detailed_info_dict}
         """
-        return self.last_detailed_readings.copy()
+        # OPTIMIZED: Reuse result dict
+        self._temp_result.clear()
+        
+        for sensor_id in range(self.next_sensor_id):
+            sensor_name = self.sensor_names[sensor_id]
+            reading = self.detailed_readings_array[sensor_id]
+            
+            if sensor_name and reading:
+                self._temp_result[sensor_name] = {
+                    'sensor_id': sensor_id,
+                    'sensor_name': sensor_name,
+                    'temperature': reading.temperature,
+                    'humidity': reading.humidity,
+                    'battery_level': reading.battery_level,
+                    'rssi': reading.rssi,
+                    'voltage': reading.voltage,
+                    'power': reading.power,
+                    'last_updated': reading.last_updated
+                }
+        
+        return self._temp_result.copy()  # Return copy for safety
     
     def get_last_detailed_readings_summary(self, max_age_minutes=60):
         """
@@ -152,13 +211,26 @@ class TemperatureLogger:
         max_age_seconds = max_age_minutes * 60
         
         recent_readings = {}
-        for sensor_name, reading in self.last_detailed_readings.items():
-            age_seconds = current_time - reading['last_updated']
-            if age_seconds <= max_age_seconds:
-                # Add age info to the reading
-                reading_with_age = reading.copy()
-                reading_with_age['age_minutes'] = round(age_seconds / 60, 1)
-                recent_readings[sensor_name] = reading_with_age
+        for sensor_id in range(self.next_sensor_id):
+            sensor_name = self.sensor_names[sensor_id]
+            reading = self.detailed_readings_array[sensor_id]
+            
+            if sensor_name and reading:
+                age_seconds = current_time - reading.last_updated
+                if age_seconds <= max_age_seconds:
+                    # Add age info to the reading
+                    recent_readings[sensor_name] = {
+                        'sensor_id': sensor_id,
+                        'sensor_name': sensor_name,
+                        'temperature': reading.temperature,
+                        'humidity': reading.humidity,
+                        'battery_level': reading.battery_level,
+                        'rssi': reading.rssi,
+                        'voltage': reading.voltage,
+                        'power': reading.power,
+                        'last_updated': reading.last_updated,
+                        'age_minutes': round(age_seconds / 60, 1)
+                    }
         
         return recent_readings
     
@@ -256,8 +328,6 @@ class TemperatureLogger:
         
         return result
     
-    # Keep all the existing methods unchanged below this point...
-    
     def _update_existing_reading(self, sensor_name, temperature, timestamp):
         """
         Find and update the most recent reading for this sensor in the buffer.
@@ -271,7 +341,7 @@ class TemperatureLogger:
         # Search backwards from head to find most recent reading for this sensor
         pos = (self.head - 1) % self.max_readings
         
-        for i in range(self.count):
+        for i in range(min(self.count, 50)):  # Limit search to recent readings
             start_byte = pos * self.record_size
             record_data = self.buffer[start_byte:start_byte + self.record_size]
             
@@ -347,11 +417,15 @@ class TemperatureLogger:
             
             timestamp = self.start_time + (relative_minutes * 60)
             temperature = temp_scaled / 100.0
-            sensor_name = self.id_to_name.get(sensor_id, f"unknown_{sensor_id}")
+            
+            # Use array lookup instead of dict
+            sensor_name = self.sensor_names[sensor_id] if sensor_id < len(self.sensor_names) else f"unknown_{sensor_id}"
+            if sensor_name is None:
+                sensor_name = f"unknown_{sensor_id}"
             
             return timestamp, sensor_name, temperature
             
-        except (struct.error, KeyError):
+        except (struct.error, IndexError):
             return None
     
     def _get_records_in_range(self, max_age_seconds=None, max_count=None):
@@ -375,7 +449,8 @@ class TemperatureLogger:
         else:
             cutoff_time = 0  # Include all records if no age limit
         
-        all_valid_records = []
+        # OPTIMIZED: Reuse list instead of creating new one
+        self._temp_records.clear()
         
         # Scan all records in the ring buffer
         pos = self.tail
@@ -390,18 +465,18 @@ class TemperatureLogger:
                 
                 # Include if within time window
                 if timestamp >= cutoff_time:
-                    all_valid_records.append((timestamp, sensor_name, temperature))
+                    self._temp_records.append((timestamp, sensor_name, temperature))
             
             pos = (pos + 1) % self.max_readings
         
         # Sort by timestamp (chronological order)
-        all_valid_records.sort(key=lambda x: x[0])
+        self._temp_records.sort(key=lambda x: x[0])
         
         # Return most recent records if count limit specified
-        if max_count and len(all_valid_records) > max_count:
-            return all_valid_records[-max_count:]
+        if max_count and len(self._temp_records) > max_count:
+            return self._temp_records[-max_count:]
         
-        return all_valid_records
+        return self._temp_records.copy()  # Return copy for safety
     
     def get_all_current_temps(self, max_age_minutes=60):
         """
@@ -548,6 +623,10 @@ class TemperatureLogger:
         """Get memory usage information"""
         buffer_size_bytes = len(self.buffer)
         
+        # Count active sensors
+        active_sensors = sum(1 for name in self.sensor_names[:self.next_sensor_id] if name is not None)
+        active_detailed = sum(1 for reading in self.detailed_readings_array[:self.next_sensor_id] if reading is not None)
+        
         return {
             'used_records': self.count,
             'max_records': self.max_readings,
@@ -555,8 +634,9 @@ class TemperatureLogger:
             'max_bytes': buffer_size_bytes,
             'percent_full': round((self.count / self.max_readings) * 100, 2),
             'bytes_per_record': self.record_size,
-            'sensor_count': len(self.name_to_id),
-            'detailed_readings_count': len(self.last_detailed_readings),
+            'sensor_count': active_sensors,
+            'detailed_readings_count': active_detailed,
+            'sensor_slots_used': f"{active_sensors}/{self.max_sensors}",
             'days_running': round((time.time() - self.start_time) / 86400, 2),
             'is_buffer_full': self.count >= self.max_readings,
             'buffer_wrapped': self.count >= self.max_readings,
@@ -579,19 +659,24 @@ class TemperatureLogger:
             
             try:
                 _, sensor_id, _ = struct.unpack('<HBh', record_data)
-                sensor_name = self.id_to_name.get(sensor_id, f"unknown_{sensor_id}")
+                # Use array lookup
+                sensor_name = self.sensor_names[sensor_id] if sensor_id < len(self.sensor_names) else f"unknown_{sensor_id}"
+                if sensor_name is None:
+                    sensor_name = f"unknown_{sensor_id}"
                 sensor_counts[sensor_name] = sensor_counts.get(sensor_name, 0) + 1
             except:
                 pass
             
             pos = (pos + 1) % self.max_readings
         
+        active_sensors = len([n for n in self.sensor_names[:self.next_sensor_id] if n is not None])
+        
         return {
             'total_records': self.count,
             'records_per_sensor': sensor_counts,
-            'average_per_sensor': self.count / len(self.name_to_id) if self.name_to_id else 0,
+            'average_per_sensor': self.count / active_sensors if active_sensors else 0,
             'theoretical_max_per_sensor': (24 * 60) // (self.min_interval_seconds // 60),  # readings per day
-            'storage_efficiency': f"{(self.count / (len(self.name_to_id) * 288)):.1%}" if self.name_to_id else "0%"  # 288 = 24hrs * 12 readings/hr
+            'storage_efficiency': f"{(self.count / (active_sensors * 288)):.1%}" if active_sensors else "0%"  # 288 = 24hrs * 12 readings/hr
         }
     
     def print_storage_report(self):
@@ -627,11 +712,11 @@ class TemperatureLogger:
     
     def get_sensor_names(self):
         """Get list of all known sensor names"""
-        return list(self.name_to_id.keys())
+        return [name for name in self.sensor_names[:self.next_sensor_id] if name is not None]
     
     def get_sensor_count(self):
         """Get number of registered sensors"""
-        return len(self.name_to_id)
+        return len([name for name in self.sensor_names[:self.next_sensor_id] if name is not None])
     
     def sensor_exists(self, sensor_name):
         """Check if a sensor has been registered"""
@@ -642,6 +727,11 @@ class TemperatureLogger:
         self.head = 0
         self.tail = 0
         self.count = 0
+        # Clear array-based storage
+        for i in range(self.next_sensor_id):
+            self.last_stored_time_array[i] = 0.0
+            self.detailed_readings_array[i] = None
+        # Clear legacy dicts for compatibility
         self.last_stored_time.clear()
         self.last_detailed_readings.clear()
         print("All readings cleared")
@@ -651,6 +741,8 @@ class TemperatureLogger:
         self.clear_all_data()
         self.name_to_id.clear()
         self.id_to_name.clear()
+        for i in range(self.next_sensor_id):
+            self.sensor_names[i] = None
         self.next_sensor_id = 0
         print("All data and sensor registrations cleared")
     
@@ -695,24 +787,63 @@ class TemperatureLogger:
     
     def get_time_since_last_storage(self, sensor_name):
         """Get seconds since we last STORED (not just received) a reading from this sensor"""
-        if sensor_name not in self.last_stored_time:
+        if sensor_name not in self.name_to_id:
             return float('inf')  # Never stored
         
-        return time.time() - self.last_stored_time[sensor_name]
+        sensor_id = self.name_to_id[sensor_name]
+        last_storage = self.last_stored_time_array[sensor_id]
+        return time.time() - last_storage
     
     def get_sensors_ready_for_storage(self):
         """Get list of sensors ready to store new readings (5+ minutes since last storage)"""
         ready_sensors = []
         current_time = time.time()
         
-        for sensor_name in self.name_to_id.keys():
-            last_storage = self.last_stored_time.get(sensor_name, 0)
-            if (current_time - last_storage) >= self.min_interval_seconds:
-                ready_sensors.append(sensor_name)
+        for sensor_id in range(self.next_sensor_id):
+            sensor_name = self.sensor_names[sensor_id]
+            if sensor_name is not None:
+                last_storage = self.last_stored_time_array[sensor_id]
+                if (current_time - last_storage) >= self.min_interval_seconds:
+                    ready_sensors.append(sensor_name)
         
         return ready_sensors
     
     def force_new_reading_for_sensor(self, sensor_name):
         """Force the next reading from this sensor to be stored as new"""
-        if sensor_name in self.last_stored_time:
-            del self.last_stored_time[sensor_name]
+        if sensor_name in self.name_to_id:
+            sensor_id = self.name_to_id[sensor_name]
+            self.last_stored_time_array[sensor_id] = 0.0
+    
+    # Legacy compatibility properties - populate on demand
+    @property
+    def last_stored_time(self):
+        """Legacy compatibility - builds dict from array on demand"""
+        if not hasattr(self, '_last_stored_time_dict'):
+            self._last_stored_time_dict = {}
+        
+        # Update dict from array
+        for sensor_id in range(self.next_sensor_id):
+            sensor_name = self.sensor_names[sensor_id]
+            if sensor_name:
+                self._last_stored_time_dict[sensor_name] = self.last_stored_time_array[sensor_id]
+        
+        return self._last_stored_time_dict
+    
+    @last_stored_time.setter
+    def last_stored_time(self, value):
+        """Legacy compatibility - updates array from dict"""
+        self._last_stored_time_dict = value
+        for sensor_name, timestamp in value.items():
+            if sensor_name in self.name_to_id:
+                sensor_id = self.name_to_id[sensor_name]
+                self.last_stored_time_array[sensor_id] = timestamp
+    
+    @property
+    def last_detailed_readings(self):
+        """Legacy compatibility - builds dict from array on demand"""
+        return self.get_all_last_detailed_readings()
+    
+    @last_detailed_readings.setter
+    def last_detailed_readings(self, value):
+        """Legacy compatibility - not implemented as it would break optimizations"""
+        pass  # Ignore sets to maintain optimization

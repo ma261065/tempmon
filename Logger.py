@@ -718,6 +718,34 @@ class TemperatureLogger:
         """Get number of registered sensors"""
         return len([name for name in self.sensor_names[:self.next_sensor_id] if name is not None])
     
+    def get_sensor_data_count(self, sensor_name):
+        """   Get total count of stored data points for a specific sensor
+        Returns:
+        int: Number of data points stored for this sensor
+        """
+        if sensor_name not in self.name_to_id:
+            return 0
+    
+        sensor_id = self.name_to_id[sensor_name]
+        count = 0
+        
+        # Scan the entire ring buffer to count records for this sensor
+        pos = self.tail
+        for i in range(self.count):
+            start_byte = pos * self.record_size
+            record_data = self.buffer[start_byte:start_byte + self.record_size]
+            
+            try:
+                _, stored_sensor_id, _ = struct.unpack('<HBh', record_data)
+                if stored_sensor_id == sensor_id:
+                    count += 1
+            except:
+                pass
+            
+            pos = (pos + 1) % self.max_readings
+        
+        return count
+    
     def sensor_exists(self, sensor_name):
         """Check if a sensor has been registered"""
         return sensor_name in self.name_to_id

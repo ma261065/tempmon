@@ -235,7 +235,7 @@
                     <img src="thermo.svg" alt="Thermometer">
                     Temperature Monitor
                 </h1>
-                <p class="subtitle">Temperature Monitor with Smart Gap Detection</p>
+                <p class="subtitle">Simple Server-Authoritative Data Sync</p>
             </header>
 
             <div class="dashboard">
@@ -260,8 +260,8 @@
                             </div>
                         </div>
                         <div class="info-item">
-                            <div class="label">Data Points</div>
-                            <div class="value" id="dataPointCount">0</div>
+                            <div class="label">Local / Server</div>
+                            <div class="value"><span id="localDataCount">0</span> / <span id="serverDataCount">0</span></div>
                         </div>
                         <div class="info-item">
                             <div class="label">Current Time</div>
@@ -276,7 +276,7 @@
             </div>
 
             <footer class="footer">
-                <p>Data updates every minute • Chart displays 24-hour rolling window • Automatic gap detection and recovery</p>
+                <p>Data updates every minute • Chart displays 24-hour rolling window • Server-authoritative sync</p>
             </footer>
         </div>
         
@@ -287,83 +287,36 @@
             const ctx = document.getElementById('temperatureChart');
             const DISPLAY_DATA_POINTS = 289; // 0–288
             const INTERVAL_MINUTES = 5;
-            const EXPECTED_DATA_INTERVAL_MINUTES = 5;
 
             // Store data points with their timestamps for proper repositioning
             let dataPoints = new Map(); // timestamp -> {value, dayjs_obj}
+            let serverDataCount = 0; // Track server's total data points
             let lastHistoricalFetch = null; // Prevent rapid repeated fetches
-
-            // Full data contiguity check
-            function checkFullDataContiguity() {
-                if (dataPoints.size < 2) {
-                    return { 
-                        isContiguous: false, 
-                        needsHistory: dataPoints.size === 0, // Only fetch if we have no data at all
-                        gaps: [],
-                        totalDataPoints: dataPoints.size
-                    };
-                }
-                
-                // Get all data points sorted by time
-                const sortedPoints = Array.from(dataPoints.entries())
-                    .map(([timestamp, data]) => ({
-                        timestamp,
-                        time: data.dayjs_obj,
-                        value: data.value
-                    }))
-                    .sort((a, b) => a.time.diff(b.time));
-                
-                const gaps = [];
-                const maxAllowedGap = EXPECTED_DATA_INTERVAL_MINUTES * 1.8; // 9 minutes tolerance
-                
-                // Check each consecutive pair
-                for (let i = 1; i < sortedPoints.length; i++) {
-                    const gap = sortedPoints[i].time.diff(sortedPoints[i-1].time, 'minutes');
-                    if (gap > maxAllowedGap) {
-                        gaps.push({
-                            start: sortedPoints[i-1].time.format('HH:mm'),
-                            end: sortedPoints[i].time.format('HH:mm'),
-                            duration: gap,
-                            startTime: sortedPoints[i-1].time,
-                            endTime: sortedPoints[i].time
-                        });
-                    }
-                }
-                
-                return {
-                    isContiguous: gaps.length === 0,
-                    needsHistory: gaps.length > 0,
-                    gaps: gaps,
-                    totalDataPoints: dataPoints.size,
-                    dataRange: sortedPoints.length > 0 ? {
-                        oldest: sortedPoints[0].time.format('HH:mm'),
-                        newest: sortedPoints[sortedPoints.length - 1].time.format('HH:mm')
-                    } : null
-                };
-            }
 
             // Update status display
             function updateDataStatus() {
-                const analysis = checkFullDataContiguity();
-                
                 let statusClass = 'good';
-                let statusText = 'Data Complete';
+                let statusText = 'Data Synced';
                 
-                if (analysis.totalDataPoints === 0) {
-                    statusClass = 'error';
+                const localCount = dataPoints.size;
+                const serverCount = serverDataCount;
+                
+                if (localCount === 0 && serverCount === 0) {
+                    statusClass = 'warning';
                     statusText = 'No Data';
-                } else if (analysis.gaps.length > 0) {
+                } else if (localCount < serverCount) {
                     statusClass = 'warning';
-                    statusText = `${analysis.gaps.length} Gap(s) Detected`;
-                } else if (analysis.totalDataPoints < 50) { // Less than ~4 hours of data
-                    statusClass = 'warning';
-                    statusText = 'Limited Data';
+                    statusText = 'Syncing...';
+                } else if (localCount === serverCount && serverCount > 0) {
+                    statusClass = 'good';
+                    statusText = 'Complete';
                 }
                 
                 // Update UI elements
                 const statusIndicator = document.getElementById('dataStatusIndicator');
                 const statusTextElement = document.getElementById('dataStatusText');
-                const dataPointCountElement = document.getElementById('dataPointCount');
+                const localDataCountElement = document.getElementById('localDataCount');
+                const serverDataCountElement = document.getElementById('serverDataCount');
                 
                 if (statusIndicator) {
                     statusIndicator.className = `status-indicator ${statusClass === 'good' ? '' : statusClass}`;
@@ -373,19 +326,18 @@
                     statusTextElement.textContent = statusText;
                 }
                 
-                if (dataPointCountElement) {
-                    dataPointCountElement.textContent = analysis.totalDataPoints.toString();
+                if (localDataCountElement) {
+                    localDataCountElement.textContent = localCount.toString();
                 }
                 
-                console.log("Data status:", statusText, "- Points:", analysis.totalDataPoints, "- Gaps:", analysis.gaps.length);
-                if (analysis.gaps.length > 0) {
-                    console.log("Gaps found:", analysis.gaps);
+                if (serverDataCountElement) {
+                    serverDataCountElement.textContent = serverCount.toString();
                 }
                 
-                return analysis;
+                console.log(`Data status: Local ${localCount}, Server ${serverCount} - ${statusText}`);
             }
 
-            // Get current rolling window boundaries (consistent across all functions)
+            // Get current rolling window boundaries
             function getCurrentWindow() {
                 const now = dayjs();
                 const nextFullHour = dayjs(now).add(1, 'hour').startOf('hour');
@@ -396,7 +348,6 @@
 
             // Rolling window positioning - data moves with time
             function getDataIndexForTime(timeString) {
-                console.log("=== CALCULATING DATA INDEX ===");
                 const now = dayjs();
                 const today = now.format('YYYY-MM-DD');
                 let dataTime = dayjs(`${today} ${timeString}`, 'YYYY-MM-DD HH:mm');
@@ -409,11 +360,6 @@
                 const minutesFromWindowStart = dataTime.diff(windowStart, 'minute', true);
                 const index = Math.floor(minutesFromWindowStart / INTERVAL_MINUTES);
                 
-                console.log("Data time:", dataTime.format('YYYY-MM-DD HH:mm'));
-                console.log("Window start:", windowStart.format('YYYY-MM-DD HH:mm'));
-                console.log("Minutes from window start:", minutesFromWindowStart);
-                console.log("Calculated index:", index);
-                
                 return {
                     index: Math.max(0, Math.min(index, 288)),
                     dataTime: dataTime,
@@ -423,7 +369,6 @@
 
             // Generate complete rolling labels
             function generateRollingLabels() {
-                console.log("=== GENERATING ROLLING LABELS ===");
                 const labels = [];
                 const { windowStart } = getCurrentWindow();
                 
@@ -431,18 +376,12 @@
                     labels.push(windowStart.add(i * INTERVAL_MINUTES, 'minute').format('HH:mm'));
                 }
                 
-                console.log("Window start:", windowStart.format('YYYY-MM-DD HH:mm'));
-                console.log("Generated labels - first 5:", labels.slice(0, 5));
-                console.log("Generated labels - last 5:", labels.slice(-5));
-                
                 return labels;
             }
 
             // Rebuild data array from stored data points based on current time window
             function rebuildDataArray() {
-                console.log("=== REBUILDING DATA ARRAY ===");
                 const { windowStart, windowEnd } = getCurrentWindow();
-                
                 const newData = new Array(DISPLAY_DATA_POINTS).fill(null);
                 
                 // Filter and reposition data points that fall within the current window
@@ -453,16 +392,13 @@
                         
                         if (index >= 0 && index < DISPLAY_DATA_POINTS) {
                             newData[index] = dataPoint.value;
-                            console.log(`Repositioned data: ${timestamp} -> index ${index}, value ${dataPoint.value}`);
                         }
                     } else {
                         // Remove data points that are now outside the window
-                        console.log(`Removing old data point: ${timestamp}`);
                         dataPoints.delete(timestamp);
                     }
                 }
                 
-                console.log(`Active data points: ${dataPoints.size}`);
                 return newData;
             }
 
@@ -479,7 +415,7 @@
                         backgroundColor: 'rgba(79, 195, 247, 0.1)',
                         fill: true,
                         tension: 0.3,
-                        pointRadius: 0,
+                        pointRadius: 2,
                         pointBackgroundColor: 'rgba(79, 195, 247, 0.8)',
                         pointBorderColor: 'rgba(79, 195, 247, 1)',
                         borderWidth: 2,
@@ -532,16 +468,11 @@
                 const now = dayjs();
                 const currentHour = now.hour();
                 
-                console.log("=== LABEL UPDATE CHECK ===", now.format('HH:mm:ss'));
-                
                 if (currentHour !== lastUpdatedHour) {
-                    console.log("🕐 Hour changed:", lastUpdatedHour, "→", currentHour);
                     lastUpdatedHour = currentHour;
                     
-                    // Generate new labels
+                    // Generate new labels and rebuild data array
                     const newRollingLabels = generateRollingLabels();
-                    
-                    // Rebuild data array with proper positioning
                     const newDataArray = rebuildDataArray();
                     
                     // Update chart
@@ -550,7 +481,7 @@
                     cc.data.datasets[0].data = newDataArray;
                     
                     cc.update('none');
-                    console.log("✅ Rolling window update complete with data repositioning");
+                    console.log("Rolling window update complete");
                 }
             }
 
@@ -558,22 +489,34 @@
                 console.log("=== PROCESSING NEW DATA ===", item);
                 try {
                     const newData = JSON.parse(item);
+                    
+                    // Skip invalid temperature values during sensor initialization
+                    if (newData.temperature === "None" || newData.temperature === null || newData.temperature === undefined || newData.temperature === "") {
+                        console.log("Temperature value is invalid:", newData.temperature, "- skipping");
+                        
+                        // Still update server count if provided
+                        if (newData.totalDataPoints !== undefined) {
+                            serverDataCount = newData.totalDataPoints;
+                            updateDataStatus();
+                        }
+                        return;
+                    }
+                    
                     const result = getDataIndexForTime(newData.time);
                     const dataIndex = result.index;
                     
                     if (dataIndex >= 0 && dataIndex < DISPLAY_DATA_POINTS) {
-                        // Check for invalid temperature values
-                        if (newData.temperature === "None" || newData.temperature === null || newData.temperature === undefined || newData.temperature === "") {
-                            console.log("⚠ Temperature value is invalid:", newData.temperature, "- skipping data point");
+                        const newValue = parseFloat(newData.temperature);
+                        
+                        if (isNaN(newValue)) {
+                            console.error("Temperature value is NaN after parsing, skipping");
                             return;
                         }
-
-                        const newValue = parseFloat(newData.temperature);
+                        
                         const newTimestamp = result.dataTime.format('YYYY-MM-DD HH:mm');
                         const newDataTime = result.dataTime;
                         
-                        // Check if we already have data for this 5-minute window
-                        // Look for existing data points that map to the same chart index
+                        // Check if we already have data for this 5-minute window (keep most recent)
                         let existingTimestamp = null;
                         let existingDataTime = null;
                         
@@ -586,14 +529,12 @@
                             }
                         }
                         
-                        // If we found existing data for this window, keep only the more recent one
+                        // Keep only the most recent data point for this 5-minute window
                         if (existingTimestamp && existingDataTime) {
                             if (newDataTime.isAfter(existingDataTime)) {
-                                // New data is more recent, remove the old one
                                 dataPoints.delete(existingTimestamp);
                                 console.log(`Replaced older data at ${existingTimestamp} with newer data at ${newTimestamp}`);
                             } else {
-                                // Existing data is more recent, ignore new data
                                 console.log(`Ignoring older data ${newTimestamp}, keeping existing ${existingTimestamp}`);
                                 return;
                             }
@@ -608,38 +549,41 @@
                         // Update chart data
                         cc.data.datasets[0].data[dataIndex] = newValue;
 
-                        // Update the large temperature overlay
+                        // Update the temperature display
                         const tempElement = document.getElementById('currentTemp');
                         if (tempElement) {
                             tempElement.textContent = newValue.toFixed(1);
                         }
 
                         cc.update('none');
-                        cc.setActiveElements([]);
-                        cc.tooltip.setActiveElements([], {x: 0, y: 0});
-                        console.log("✅ Data updated at index", dataIndex, ":", newValue, "timestamp:", newTimestamp);
-                        
-                        // Check data contiguity after adding new data
-                        const contiguityCheck = checkFullDataContiguity();
-                        updateDataStatus();
-                        
-                        // Only fetch historical data if we have gaps and haven't fetched recently
-                        const now = dayjs();
-                        const shouldFetch = contiguityCheck.needsHistory && 
-                                          (!lastHistoricalFetch || now.diff(lastHistoricalFetch, 'minutes') > 2);
-                        
-                        if (shouldFetch) {
-                            console.log("🔍 Data gaps detected, fetching historical data");
-                            console.log("Gaps:", contiguityCheck.gaps);
-                            lastHistoricalFetch = now;
-                            fetchHistoricalData();
-                        }
+                        console.log(`Data updated at index ${dataIndex}: ${newValue}°C`);
                         
                     } else {
-                        console.log("⚠ INDEX OUT OF RANGE:", dataIndex);
+                        console.log("INDEX OUT OF RANGE:", dataIndex);
                     }
+                    
+                    // Server-authoritative sync check
+                    if (newData.totalDataPoints !== undefined) {
+                        serverDataCount = newData.totalDataPoints;
+                        
+                        // Simple comparison: if server has more data points, fetch history
+                        const localCount = dataPoints.size;
+                        if (serverDataCount > localCount) {
+                            const now = dayjs();
+                            const shouldFetch = !lastHistoricalFetch || now.diff(lastHistoricalFetch, 'minutes') > 2;
+                            
+                            if (shouldFetch) {
+                                console.log(`Server has ${serverDataCount} data points, we have ${localCount} - fetching history`);
+                                lastHistoricalFetch = now;
+                                fetchHistoricalData();
+                            }
+                        }
+                    }
+                    
+                    updateDataStatus();
+                    
                 } catch (error) {
-                    console.error("⚠ Error processing data:", error);
+                    console.error("Error processing data:", error);
                 }
             }
 
@@ -651,36 +595,36 @@
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     
                     const responseText = await response.text();
-                    console.log("Raw response:", responseText);
-                    
                     let historicalData;
                     try {
                         historicalData = JSON.parse(responseText);
                     } catch (parseError) {
                         console.error("JSON parse error:", parseError);
-                        console.error("Response was:", responseText);
                         return;
                     }
                     
                     if (!Array.isArray(historicalData)) {
-                        console.error("Expected array but got:", typeof historicalData, historicalData);
+                        console.error("Expected array but got:", typeof historicalData);
                         return;
                     }
                     
                     console.log("Received historical data points:", historicalData.length);
                     
                     if (historicalData.length === 0) {
-                        console.log("No historical data available from server");
+                        console.log("No historical data available");
                         return;
                     }
                     
-                    // Process historical data (merge with existing, don't replace)
+                    // Process historical data (merge, don't replace)
                     let processedCount = 0;
-                    let oldestTime = null;
-                    let newestTime = null;
                     
                     for (const dataPoint of historicalData) {
                         try {
+                            // Skip invalid temperature values
+                            if (dataPoint.temperature === "None" || dataPoint.temperature === null || dataPoint.temperature === undefined) {
+                                continue;
+                            }
+                            
                             const dateStr = dataPoint.date || dayjs().format('YYYY-MM-DD');
                             const dataTime = dayjs(`${dateStr} ${dataPoint.time}`, 'YYYY-MM-DD HH:mm');
                             const timestamp = dataTime.format('YYYY-MM-DD HH:mm');
@@ -692,13 +636,6 @@
                                     dayjs_obj: dataTime
                                 });
                                 processedCount++;
-                                
-                                if (!oldestTime || dataTime.isBefore(oldestTime)) {
-                                    oldestTime = dataTime;
-                                }
-                                if (!newestTime || dataTime.isAfter(newestTime)) {
-                                    newestTime = dataTime;
-                                }
                             }
                         } catch (error) {
                             console.warn("Error processing historical data point:", dataPoint, error);
@@ -706,27 +643,21 @@
                     }
                     
                     console.log(`Successfully processed ${processedCount} new historical data points`);
-                    if (oldestTime && newestTime) {
-                        console.log(`Data range: ${oldestTime.format('YYYY-MM-DD HH:mm')} to ${newestTime.format('YYYY-MM-DD HH:mm')}`);
-                        console.log(`Coverage: ${newestTime.diff(oldestTime, 'hour', true).toFixed(1)} hours`);
-                    }
                     
                     // Rebuild the chart with all data
                     const newDataArray = rebuildDataArray();
                     cc.data.datasets[0].data = newDataArray;
                     cc.update('none');
                     
-                    // Update status
                     updateDataStatus();
-                    
-                    console.log("✅ Historical data loaded and chart updated");
+                    console.log("Historical data loaded and chart updated");
                     
                 } catch (err) {
-                    console.error("⚠ Failed to fetch historical data:", err);
+                    console.error("Failed to fetch historical data:", err);
                 }
             }
 
-            // Enhanced polling with contiguity check
+            // Polling function
             async function pollData() {
                 console.log("=== NETWORK POLLING ===", new Date().toLocaleTimeString());
                 try {
@@ -735,7 +666,7 @@
                     const text = await response.text();
                     ProcessData(text);
                 } catch (err) {
-                    console.error("⚠ TempData request failed:", err);
+                    console.error("TempData request failed:", err);
                 }
             }
 
@@ -745,7 +676,6 @@
                     const response = await fetch("/api/status");
                     if (!response.ok) throw new Error(`HTTP ${response.status}`); 
                         const data = await response.json();
-                        // Update time and uptime fields
                         ['time', 'uptime'].forEach(key => {
                             const element = document.getElementById(key);
                             if (element && data[key]) {
@@ -753,62 +683,49 @@
                             }
                         });
                 } catch (err) {
-                    console.error("⚠ Status request failed:", err);
+                    console.error("Status request failed:", err);
                 }
             }
 
-            // === Scheduling system for label updates ===
+            // Scheduling system for label updates
             function scheduleLabelUpdate() {
                 const now = new Date();
                 const msUntilNextHour = (60 - now.getMinutes()) * 60000
                                       - now.getSeconds() * 1000
                                       - now.getMilliseconds();
 
-                console.log("Next label update scheduled in", (msUntilNextHour / 1000).toFixed(1), "seconds");
-
                 setTimeout(() => {
                     updateLabelsToCurrentTime();
-                    scheduleLabelUpdate(); // reschedule for the following hour
+                    scheduleLabelUpdate();
                 }, msUntilNextHour);
             }
 
             // Initialize the application
             async function initializeApp() {
                 console.log("=== INITIALIZING APPLICATION ===");
-                
-                // Update labels first
                 updateLabelsToCurrentTime();
-                
-                // Poll immediately for initial data
                 await pollData();
-                
                 console.log("=== INITIALIZATION COMPLETE ===");
             }
 
-            // Run initialization after a short delay
+            // Run initialization
             setTimeout(initializeApp, 1000);
 
-            // Kick off hourly scheduling
+            // Start scheduling
             scheduleLabelUpdate();
 
-            // Enhanced tab wake-up detection
+            // Tab wake-up detection
             document.addEventListener("visibilitychange", async () => {
                 if (document.visibilityState === "visible") {
-                    console.log("🔄 Tab became visible – checking data and polling immediately");
+                    console.log("Tab became visible - polling immediately");
                     updateLabelsToCurrentTime();
-                    
-                    // Poll immediately when tab becomes visible
                     await pollData();
                 }
             });
 
-            // Polling for new temperature data (every minute)
+            // Regular polling and status updates
             setInterval(pollData, 60000);
-
-            // Update time every second
             setInterval(updateStatus, 1000);
-            
-            // Update data status every 10 seconds (also updates when new data arrives)
             setInterval(updateDataStatus, 10000);
         </script>
 

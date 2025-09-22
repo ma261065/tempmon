@@ -182,8 +182,11 @@ async def serve(writer, filename, logger):
         current_temps = logger.get_all_current_temps(max_age_minutes=10)
         temp = current_temps.get("a4:c1:38:da:5e:ca")
 
-        ty = f'{{"time": "{formatted_time}", "temperature": "{temp}"}}'
-        
+        # Get total data point count for this sensor
+        total_count = logger.get_sensor_data_count("a4:c1:38:da:5e:ca")
+
+        ty = f'{{"time": "{formatted_time}", "temperature": "{temp}", "totalDataPoints": {total_count}}}'
+           
         await writer.awrite(ty)
         await writer.drain()
 

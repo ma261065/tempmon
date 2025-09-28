@@ -18,6 +18,7 @@ import gc
 #import webserver
 from Logger import TemperatureLogger
 from femtoweb import start_webserver
+import micropython
 
 #_IRQ_SCAN_RESULT = const(5)
 #_IRQ_SCAN_DONE = const(6)
@@ -188,6 +189,8 @@ async def send_mqtt():
             now = time.localtime(time.time() + 3600 * 10) # Timezone is UTC+10
             print(f"Time: {now[0]}-{now[1]:02}-{now[2]:02} {now[3]:02}:{now[4]:02}:{now[5]:02}")
             print(f"Free memory: {gc.mem_free()}")
+            micropython.mem_info()
+
 
             print(logger.get_memory_info())
             print(logger.get_all_current_temps())

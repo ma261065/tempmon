@@ -11,7 +11,7 @@ UTC_OFFSET = 10 * 60 * 60
 # OPTIMIZED: Pre-allocated buffers to avoid frequent allocations
 _file_buffer = bytearray(512)  # For file reading (larger chunks than original 64 bytes)
 _temp_dict = {}  # Reusable dictionary for JSON responses
-_history_list = []  # Reusable list for history data
+
 
 def get_time():
     uptime_s = int(time.ticks_ms() / 1000)
@@ -120,7 +120,7 @@ async def serve(writer, filename, logger):
     
     if filename.startswith("/api/status"):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
-        await writer.awrite("Content-Type: application/json\r\n\r\n")
+        await writer.awrite(b"Content-Type: application/json\r\n\r\n")
 
         time_str, uptime_str = get_time()
 
@@ -129,7 +129,7 @@ async def serve(writer, filename, logger):
         _temp_dict["time"] = time_str
         _temp_dict["uptime"] = uptime_str
 
-        await writer.awrite(json.dumps(_temp_dict))
+        await writer.awrite(json.dumps(_temp_dict).encode())
         
         await writer.drain()
 
@@ -140,30 +140,33 @@ async def serve(writer, filename, logger):
     
     if filename.startswith("/api/history"):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
-        await writer.awrite("Content-Type: application/json\r\n\r\n")
+        await writer.awrite(b"Content-Type: application/json\r\n\r\n")
 
-        # OPTIMIZED: Use efficient sensor history retrieval
-        temp_data = logger.get_sensor_history("a4:c1:38:da:5e:ca", max_readings=24*12)
-
-        if not temp_data:
-            await writer.awrite("{}")
-            await writer.drain()
-            await writer.aclose()
-            await writer.wait_closed()
-            return
-    
-        # OPTIMIZED: Reuse history list instead of creating new one
-        _history_list.clear()
-        for timestamp_since_epoch, temperature in temp_data:
+        # TRUE STREAMING: Process records one at a time with ZERO intermediate lists
+        await writer.awrite(b'[')
+        
+        first_item = True
+        record_count = 0
+        
+        # This uses the reverse streaming function - yields newest records first
+        for timestamp_since_epoch, temperature in logger.stream_history_reverse("a4:c1:38:da:5e:ca", 24*12):
+            if not first_item:
+                await writer.awrite(b',')
+            first_item = False
+            
             time_tuple = time.localtime(timestamp_since_epoch + UTC_OFFSET)
             hh_mm = f"{time_tuple[3]:02d}:{time_tuple[4]:02d}"
             
-            _history_list.append({
-                "time": hh_mm,
-                "temperature": f"{temperature:.2f}",
-            })
+            # Write JSON object directly as bytes - no dict creation
+            json_item = f'{{"time":"{hh_mm}","temperature":"{temperature:.2f}"}}'
+            await writer.awrite(json_item.encode())
+            
+            record_count += 1
+            # Periodically drain buffer every 50 records
+            if record_count % 50 == 0:
+                await writer.drain()
         
-        await writer.awrite(json.dumps(_history_list))
+        await writer.awrite(b']')
         await writer.drain()
 
         print("Closing connection", writer)
@@ -173,7 +176,7 @@ async def serve(writer, filename, logger):
 
     if filename.startswith("/tempdata"):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
-        await writer.awrite("Content-Type: application/json\r\n\r\n")
+        await writer.awrite(b"Content-Type: application/json\r\n\r\n")
 
         current_time = time.localtime(time.time() + UTC_OFFSET)
         formatted_time = "{:02d}:{:02d}".format(current_time[3], current_time[4])
@@ -187,7 +190,7 @@ async def serve(writer, filename, logger):
 
         ty = f'{{"time": "{formatted_time}", "temperature": "{temp}", "totalDataPoints": {total_count}}}'
            
-        await writer.awrite(ty)
+        await writer.awrite(ty.encode())
         await writer.drain()
 
         print("Closing connection", writer)
@@ -273,60 +276,3 @@ async def start_webserver(logger):
     )
     # No need for serve_forever; let the event loop manage the server
     return server  # Keep the server alive by returning it
-
-async def scan_blea():
-    while True:
-        async with aioble.scan(
-            duration_ms=50,        # Total duration of the scan in milliseconds was 100
-            interval_us=30000,     # Scan interval in microseconds was 55_000
-            window_us=30000,       # Scan window in microseconds was 25_250
-            active=True            # Active scan mode
-        ) as scanner:
-            async for result in scanner:
-                print('@', end='') #result.device.addr)
-
-# Keeping original commented main loop
-'''try:
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_webserver())
-    loop.create_task(scan_blea())
-    loop.run_forever()
-
-except Exception as e:
-    print("Exception:", e)'''
-
-# OPTIMIZED: Additional helper functions for memory management (optional to use)
-
-def print_memory_stats():
-    """Optional: Print memory statistics if available"""
-    try:
-        import gc
-        gc.collect()  # Force garbage collection
-        free = gc.mem_free()
-        allocated = gc.mem_alloc()
-        print(f"Memory: {allocated} used, {free} free, {allocated+free} total")
-    except:
-        print("Memory stats not available")
-
-async def periodic_gc():
-    """Optional: Periodic garbage collection task"""
-    while True:
-        await asyncio.sleep(30)  # Every 30 seconds
-        try:
-            import gc
-            gc.collect()
-        except:
-            pass
-
-# Optional usage example with memory monitoring
-'''
-async def main_with_gc(logger):
-    """Optional: Enhanced main with garbage collection"""
-    server = await start_webserver(logger)
-    
-    # Start periodic garbage collection
-    asyncio.create_task(periodic_gc())
-    
-    # Start scanning
-    await scan_blea()
-'''

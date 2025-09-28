@@ -415,7 +415,7 @@
                         backgroundColor: 'rgba(79, 195, 247, 0.1)',
                         fill: true,
                         tension: 0.3,
-                        pointRadius: 2,
+                        pointRadius: 0,
                         pointBackgroundColor: 'rgba(79, 195, 247, 0.8)',
                         pointBorderColor: 'rgba(79, 195, 247, 1)',
                         borderWidth: 2,
@@ -521,8 +521,13 @@
                         let existingDataTime = null;
                         
                         for (const [timestamp, dataPoint] of dataPoints.entries()) {
-                            const existingResult = getDataIndexForTime(dataPoint.dayjs_obj.format('HH:mm'));
-                            if (existingResult.index === dataIndex) {
+                            // Calculate index directly from stored dayjs object to avoid parsing issues
+                            const { windowStart } = getCurrentWindow();
+                            const minutesFromWindowStart = dataPoint.dayjs_obj.diff(windowStart, 'minute', true);
+                            const existingIndex = Math.floor(minutesFromWindowStart / INTERVAL_MINUTES);
+                            const clampedExistingIndex = Math.max(0, Math.min(existingIndex, 288));
+                            
+                            if (clampedExistingIndex === dataIndex) {
                                 existingTimestamp = timestamp;
                                 existingDataTime = dataPoint.dayjs_obj;
                                 break;
@@ -531,6 +536,11 @@
                         
                         // Keep only the most recent data point for this 5-minute window
                         if (existingTimestamp && existingDataTime) {
+                            console.log(`Collision found! Comparing times:`);
+                            console.log(`  New: ${newDataTime.format('YYYY-MM-DD HH:mm:ss')} (${newDataTime.valueOf()})`);
+                            console.log(`  Existing: ${existingDataTime.format('YYYY-MM-DD HH:mm:ss')} (${existingDataTime.valueOf()})`);
+                            console.log(`  New isAfter Existing: ${newDataTime.isAfter(existingDataTime)}`);
+                            
                             if (newDataTime.isAfter(existingDataTime)) {
                                 dataPoints.delete(existingTimestamp);
                                 console.log(`Replaced older data at ${existingTimestamp} with newer data at ${newTimestamp}`);
@@ -615,8 +625,12 @@
                         return;
                     }
                     
-                    // Process historical data (merge, don't replace)
+                    // Process historical data with smart day boundary handling
                     let processedCount = 0;
+                    const now = dayjs();
+                    const { windowStart, windowEnd } = getCurrentWindow();
+                    
+                    console.log(`Processing historical data within window: ${windowStart.format('YYYY-MM-DD HH:mm')} to ${windowEnd.format('YYYY-MM-DD HH:mm')}`);
                     
                     for (const dataPoint of historicalData) {
                         try {
@@ -625,27 +639,84 @@
                                 continue;
                             }
                             
-                            const dateStr = dataPoint.date || dayjs().format('YYYY-MM-DD');
-                            const dataTime = dayjs(`${dateStr} ${dataPoint.time}`, 'YYYY-MM-DD HH:mm');
-                            const timestamp = dataTime.format('YYYY-MM-DD HH:mm');
-                            const temperature = parseFloat(dataPoint.temperature);
-                            
-                            if (!isNaN(temperature) && !dataPoints.has(timestamp)) {
-                                dataPoints.set(timestamp, {
-                                    value: temperature,
-                                    dayjs_obj: dataTime
-                                });
-                                processedCount++;
+                            // Smart timestamp calculation for day boundaries
+                            let dataTime;
+                            if (dataPoint.date) {
+                                // Server provided explicit date
+                                dataTime = dayjs(`${dataPoint.date} ${dataPoint.time}`, 'YYYY-MM-DD HH:mm');
+                            } else {
+                                // No date provided - determine correct day based on current time and data pattern
+                                const [hours, minutes] = dataPoint.time.split(':').map(Number);
+                                const currentHour = now.hour();
+                                
+                                // If the data hour is significantly later than current hour, it's likely from yesterday
+                                // Example: current time is 03:01, data time is 22:39 -> yesterday
+                                if (hours > currentHour + 12) {
+                                    // Definitely from yesterday
+                                    dataTime = now.subtract(1, 'day').startOf('day').hour(hours).minute(minutes);
+                                } else if (hours > currentHour) {
+                                    // Could be from yesterday or just a few hours ahead today
+                                    // Use a more nuanced approach: if it's more than 6 hours ahead, assume yesterday
+                                    if (hours - currentHour > 6) {
+                                        dataTime = now.subtract(1, 'day').startOf('day').hour(hours).minute(minutes);
+                                    } else {
+                                        dataTime = now.startOf('day').hour(hours).minute(minutes);
+                                    }
+                                } else {
+                                    // Same day or earlier today
+                                    dataTime = now.startOf('day').hour(hours).minute(minutes);
+                                }
                             }
+                            
+                            console.log(`Historical point ${dataPoint.time} -> ${dataTime.format('YYYY-MM-DD HH:mm')}`);
+                            
+                            // Check if it falls within our rolling window
+                            if (dataTime.isSameOrAfter(windowStart) && dataTime.isBefore(windowEnd)) {
+                                const timestamp = dataTime.format('YYYY-MM-DD HH:mm');
+                                const temperature = parseFloat(dataPoint.temperature);
+                                
+                                if (!isNaN(temperature) && !dataPoints.has(timestamp)) {
+                                    dataPoints.set(timestamp, {
+                                        value: temperature,
+                                        dayjs_obj: dataTime
+                                    });
+                                    processedCount++;
+                                    console.log(`Added historical point: ${timestamp} = ${temperature}°C`);
+                                }
+                            } else {
+                                console.log(`Skipping data point outside window: ${dataTime.format('YYYY-MM-DD HH:mm')} (${dataPoint.time})`);
+                            }
+                            
                         } catch (error) {
                             console.warn("Error processing historical data point:", dataPoint, error);
                         }
                     }
                     
-                    console.log(`Successfully processed ${processedCount} new historical data points`);
+                    console.log(`Successfully processed ${processedCount} historical data points within window`);
+                    
+                    // Debug: Check what we actually stored
+                    console.log("=== STORED DATA POINTS ANALYSIS ===");
+                    const sortedStoredData = Array.from(dataPoints.entries())
+                        .map(([timestamp, data]) => ({
+                            timestamp,
+                            time: data.dayjs_obj.format('YYYY-MM-DD HH:mm'),
+                            value: data.value
+                        }))
+                        .sort((a, b) => a.time.localeCompare(b.time));
+                    
+                    console.log(`Total stored data points: ${sortedStoredData.length}`);
+                    console.log("First 5 stored:", sortedStoredData.slice(0, 5));
+                    console.log("Last 5 stored:", sortedStoredData.slice(-5));
                     
                     // Rebuild the chart with all data
                     const newDataArray = rebuildDataArray();
+                    
+                    // Debug: Check chart array
+                    const nonNullChartPoints = newDataArray.map((val, idx) => val !== null ? {index: idx, value: val} : null).filter(x => x);
+                    console.log(`Chart array non-null points: ${nonNullChartPoints.length}`);
+                    console.log("First 5 chart points:", nonNullChartPoints.slice(0, 5));
+                    console.log("Last 5 chart points:", nonNullChartPoints.slice(-5));
+                    
                     cc.data.datasets[0].data = newDataArray;
                     cc.update('none');
                     

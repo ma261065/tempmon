@@ -746,6 +746,31 @@ class TemperatureLogger:
         
         return count
     
+    def stream_history_reverse(self, sensor_name, max_readings=288):
+        # Stream sensor history in reverse chronological order to avoid having to allocate a buffer for sorting
+        # Use a generator to yield results one by one
+        if sensor_name not in self.name_to_id:
+            return
+        
+        yielded_count = 0
+        pos = (self.head - 1) % self.max_readings
+        
+        for i in range(self.count):
+            if yielded_count >= max_readings:
+                break
+                
+            start_byte = pos * self.record_size
+            record_data = self.buffer[start_byte:start_byte + self.record_size]
+            
+            parsed = self._parse_record(record_data)
+            if parsed:
+                timestamp, record_sensor_name, temperature = parsed
+                if record_sensor_name == sensor_name:
+                    yield timestamp, temperature
+                    yielded_count += 1
+            
+            pos = (pos - 1) % self.max_readings
+
     def sensor_exists(self, sensor_name):
         """Check if a sensor has been registered"""
         return sensor_name in self.name_to_id

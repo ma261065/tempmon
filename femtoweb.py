@@ -158,7 +158,7 @@ async def serve(writer, filename, logger):
             hh_mm = f"{time_tuple[3]:02d}:{time_tuple[4]:02d}"
             
             # Write JSON object directly as bytes - no dict creation
-            json_item = f'{{"time":"{hh_mm}","temperature":"{temperature:.2f}"}}'
+            json_item = f'{{"ti":"{hh_mm}","te":"{temperature:.2f}"}}'
             await writer.awrite(json_item.encode())
             
             record_count += 1
@@ -188,7 +188,7 @@ async def serve(writer, filename, logger):
         # Get total data point count for this sensor
         total_count = logger.get_sensor_data_count("a4:c1:38:da:5e:ca")
 
-        ty = f'{{"time": "{formatted_time}", "temperature": "{temp}", "totalDataPoints": {total_count}}}'
+        ty = f'{{"ti": "{formatted_time}", "te": "{temp}", "dp": {total_count}}}'
            
         await writer.awrite(ty.encode())
         await writer.drain()

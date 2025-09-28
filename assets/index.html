@@ -491,22 +491,22 @@
                     const newData = JSON.parse(item);
                     
                     // Skip invalid temperature values during sensor initialization
-                    if (newData.temperature === "None" || newData.temperature === null || newData.temperature === undefined || newData.temperature === "") {
-                        console.log("Temperature value is invalid:", newData.temperature, "- skipping");
+                    if (newData.te === "None" || newData.te === null || newData.te === undefined || newData.te === "") {
+                        console.log("Temperature value is invalid:", newData.te, "- skipping");
                         
                         // Still update server count if provided
-                        if (newData.totalDataPoints !== undefined) {
-                            serverDataCount = newData.totalDataPoints;
+                        if (newData.dp !== undefined) {
+                            serverDataCount = newData.dp;
                             updateDataStatus();
                         }
                         return;
                     }
                     
-                    const result = getDataIndexForTime(newData.time);
+                    const result = getDataIndexForTime(newData.ti);
                     const dataIndex = result.index;
                     
                     if (dataIndex >= 0 && dataIndex < DISPLAY_DATA_POINTS) {
-                        const newValue = parseFloat(newData.temperature);
+                        const newValue = parseFloat(newData.te);
                         
                         if (isNaN(newValue)) {
                             console.error("Temperature value is NaN after parsing, skipping");
@@ -573,8 +573,8 @@
                     }
                     
                     // Server-authoritative sync check
-                    if (newData.totalDataPoints !== undefined) {
-                        serverDataCount = newData.totalDataPoints;
+                    if (newData.dp !== undefined) {
+                        serverDataCount = newData.dp;
                         
                         // Simple comparison: if server has more data points, fetch history
                         const localCount = dataPoints.size;
@@ -635,7 +635,7 @@
                     for (const dataPoint of historicalData) {
                         try {
                             // Skip invalid temperature values
-                            if (dataPoint.temperature === "None" || dataPoint.temperature === null || dataPoint.temperature === undefined) {
+                            if (dataPoint.te === "None" || dataPoint.te === null || dataPoint.te === undefined) {
                                 continue;
                             }
                             
@@ -643,10 +643,10 @@
                             let dataTime;
                             if (dataPoint.date) {
                                 // Server provided explicit date
-                                dataTime = dayjs(`${dataPoint.date} ${dataPoint.time}`, 'YYYY-MM-DD HH:mm');
+                                dataTime = dayjs(`${dataPoint.date} ${dataPoint.ti}`, 'YYYY-MM-DD HH:mm');
                             } else {
                                 // No date provided - determine correct day based on current time and data pattern
-                                const [hours, minutes] = dataPoint.time.split(':').map(Number);
+                                const [hours, minutes] = dataPoint.ti.split(':').map(Number);
                                 const currentHour = now.hour();
                                 
                                 // If the data hour is significantly later than current hour, it's likely from yesterday
@@ -668,12 +668,12 @@
                                 }
                             }
                             
-                            console.log(`Historical point ${dataPoint.time} -> ${dataTime.format('YYYY-MM-DD HH:mm')}`);
+                            console.log(`Historical point ${dataPoint.ti} -> ${dataTime.format('YYYY-MM-DD HH:mm')}`);
                             
                             // Check if it falls within our rolling window
                             if (dataTime.isSameOrAfter(windowStart) && dataTime.isBefore(windowEnd)) {
                                 const timestamp = dataTime.format('YYYY-MM-DD HH:mm');
-                                const temperature = parseFloat(dataPoint.temperature);
+                                const temperature = parseFloat(dataPoint.te);
                                 
                                 if (!isNaN(temperature) && !dataPoints.has(timestamp)) {
                                     dataPoints.set(timestamp, {
@@ -684,7 +684,7 @@
                                     console.log(`Added historical point: ${timestamp} = ${temperature}°C`);
                                 }
                             } else {
-                                console.log(`Skipping data point outside window: ${dataTime.format('YYYY-MM-DD HH:mm')} (${dataPoint.time})`);
+                                console.log(`Skipping data point outside window: ${dataTime.format('YYYY-MM-DD HH:mm')} (${dataPoint.ti})`);
                             }
                             
                         } catch (error) {

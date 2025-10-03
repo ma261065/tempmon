@@ -346,27 +346,6 @@
                 return { windowStart, windowEnd, nextFullHour };
             }
 
-            // Rolling window positioning - data moves with time
-            function getDataIndexForTime(timeString) {
-                const now = dayjs();
-                const today = now.format('YYYY-MM-DD');
-                let dataTime = dayjs(`${today} ${timeString}`, 'YYYY-MM-DD HH:mm');
-                
-                if (dataTime.isAfter(now)) {
-                    dataTime = dataTime.subtract(1, 'day');
-                }
-                
-                const { windowStart } = getCurrentWindow();
-                const minutesFromWindowStart = dataTime.diff(windowStart, 'minute', true);
-                const index = Math.floor(minutesFromWindowStart / INTERVAL_MINUTES);
-                
-                return {
-                    index: Math.max(0, Math.min(index, 288)),
-                    dataTime: dataTime,
-                    windowStart: windowStart
-                };
-            }
-
             // Generate complete rolling labels
             function generateRollingLabels() {
                 const labels = [];
@@ -490,11 +469,10 @@
                 try {
                     const newData = JSON.parse(item);
                     
-                    // Skip invalid temperature values during sensor initialization
+                    // Skip invalid temperature values
                     if (newData.te === "None" || newData.te === null || newData.te === undefined || newData.te === "") {
                         console.log("Temperature value is invalid:", newData.te, "- skipping");
                         
-                        // Still update server count if provided
                         if (newData.dp !== undefined) {
                             serverDataCount = newData.dp;
                             updateDataStatus();
@@ -502,8 +480,12 @@
                         return;
                     }
                     
-                    const result = getDataIndexForTime(newData.ti);
-                    const dataIndex = result.index;
+                    // Use epoch timestamp directly instead of time string
+                    const dataTime = dayjs.unix(newData.ts);
+                    const { windowStart } = getCurrentWindow();
+                    
+                    const minutesFromWindowStart = dataTime.diff(windowStart, 'minute', true);
+                    const dataIndex = Math.floor(minutesFromWindowStart / INTERVAL_MINUTES);
                     
                     if (dataIndex >= 0 && dataIndex < DISPLAY_DATA_POINTS) {
                         const newValue = parseFloat(newData.te);
@@ -513,8 +495,7 @@
                             return;
                         }
                         
-                        const newTimestamp = result.dataTime.format('YYYY-MM-DD HH:mm');
-                        const newDataTime = result.dataTime;
+                        const newTimestamp = dataTime.format('YYYY-MM-DD HH:mm');
                         
                         // Check if we already have data for this 5-minute window (keep most recent)
                         let existingTimestamp = null;
@@ -537,11 +518,11 @@
                         // Keep only the most recent data point for this 5-minute window
                         if (existingTimestamp && existingDataTime) {
                             console.log(`Collision found! Comparing times:`);
-                            console.log(`  New: ${newDataTime.format('YYYY-MM-DD HH:mm:ss')} (${newDataTime.valueOf()})`);
+                            console.log(`  New: ${dataTime.format('YYYY-MM-DD HH:mm:ss')} (${dataTime.valueOf()})`);
                             console.log(`  Existing: ${existingDataTime.format('YYYY-MM-DD HH:mm:ss')} (${existingDataTime.valueOf()})`);
-                            console.log(`  New isAfter Existing: ${newDataTime.isAfter(existingDataTime)}`);
+                            console.log(`  New isAfter Existing: ${dataTime.isAfter(existingDataTime)}`);
                             
-                            if (newDataTime.isAfter(existingDataTime)) {
+                            if (dataTime.isAfter(existingDataTime)) {
                                 dataPoints.delete(existingTimestamp);
                                 console.log(`Replaced older data at ${existingTimestamp} with newer data at ${newTimestamp}`);
                             } else {
@@ -553,7 +534,7 @@
                         // Store the new data point
                         dataPoints.set(newTimestamp, {
                             value: newValue,
-                            dayjs_obj: newDataTime
+                            dayjs_obj: dataTime
                         });
                         
                         // Update chart data
@@ -625,9 +606,8 @@
                         return;
                     }
                     
-                    // Process historical data with smart day boundary handling
+                    // Process historical data using epoch timestamps
                     let processedCount = 0;
-                    const now = dayjs();
                     const { windowStart, windowEnd } = getCurrentWindow();
                     
                     console.log(`Processing historical data within window: ${windowStart.format('YYYY-MM-DD HH:mm')} to ${windowEnd.format('YYYY-MM-DD HH:mm')}`);
@@ -639,36 +619,10 @@
                                 continue;
                             }
                             
-                            // Smart timestamp calculation for day boundaries
-                            let dataTime;
-                            if (dataPoint.date) {
-                                // Server provided explicit date
-                                dataTime = dayjs(`${dataPoint.date} ${dataPoint.ti}`, 'YYYY-MM-DD HH:mm');
-                            } else {
-                                // No date provided - determine correct day based on current time and data pattern
-                                const [hours, minutes] = dataPoint.ti.split(':').map(Number);
-                                const currentHour = now.hour();
-                                
-                                // If the data hour is significantly later than current hour, it's likely from yesterday
-                                // Example: current time is 03:01, data time is 22:39 -> yesterday
-                                if (hours > currentHour + 12) {
-                                    // Definitely from yesterday
-                                    dataTime = now.subtract(1, 'day').startOf('day').hour(hours).minute(minutes);
-                                } else if (hours > currentHour) {
-                                    // Could be from yesterday or just a few hours ahead today
-                                    // Use a more nuanced approach: if it's more than 6 hours ahead, assume yesterday
-                                    if (hours - currentHour > 6) {
-                                        dataTime = now.subtract(1, 'day').startOf('day').hour(hours).minute(minutes);
-                                    } else {
-                                        dataTime = now.startOf('day').hour(hours).minute(minutes);
-                                    }
-                                } else {
-                                    // Same day or earlier today
-                                    dataTime = now.startOf('day').hour(hours).minute(minutes);
-                                }
-                            }
+                            // Use epoch timestamp directly - no date guessing needed!
+                            const dataTime = dayjs.unix(dataPoint.ts);
                             
-                            console.log(`Historical point ${dataPoint.ti} -> ${dataTime.format('YYYY-MM-DD HH:mm')}`);
+                            console.log(`Historical point ${dataTime.format('HH:mm')} -> ${dataTime.format('YYYY-MM-DD HH:mm')}`);
                             
                             // Check if it falls within our rolling window
                             if (dataTime.isSameOrAfter(windowStart) && dataTime.isBefore(windowEnd)) {
@@ -684,7 +638,7 @@
                                     console.log(`Added historical point: ${timestamp} = ${temperature}°C`);
                                 }
                             } else {
-                                console.log(`Skipping data point outside window: ${dataTime.format('YYYY-MM-DD HH:mm')} (${dataPoint.ti})`);
+                                console.log(`Skipping data point outside window: ${dataTime.format('YYYY-MM-DD HH:mm')}`);
                             }
                             
                         } catch (error) {

@@ -7,6 +7,7 @@ import time
 import json
 
 UTC_OFFSET = 10 * 60 * 60
+MICROPYTHON_EPOCH_OFFSET = 946684800  # Seconds between Unix epoch (1970) and MicroPython epoch (2000)
 
 # OPTIMIZED: Pre-allocated buffers to avoid frequent allocations
 _file_buffer = bytearray(512)  # For file reading (larger chunks than original 64 bytes)
@@ -148,17 +149,17 @@ async def serve(writer, filename, logger):
         first_item = True
         record_count = 0
         
-        # This uses the reverse streaming function - yields newest records first
+        # Send Unix epoch timestamps - client expects seconds since 1970
         for timestamp_since_epoch, temperature in logger.stream_history_reverse("a4:c1:38:da:5e:ca", 24*12):
             if not first_item:
                 await writer.awrite(b',')
             first_item = False
             
-            time_tuple = time.localtime(timestamp_since_epoch + UTC_OFFSET)
-            hh_mm = f"{time_tuple[3]:02d}:{time_tuple[4]:02d}"
+            # Convert MicroPython epoch (2000) to Unix epoch (1970) and apply timezone
+            unix_timestamp = timestamp_since_epoch + MICROPYTHON_EPOCH_OFFSET
             
-            # Write JSON object directly as bytes - no dict creation
-            json_item = f'{{"ti":"{hh_mm}","te":"{temperature:.2f}"}}'
+            # Send raw Unix timestamp (saves bandwidth vs date strings)
+            json_item = f'{{"ts":{unix_timestamp},"te":"{temperature:.2f}"}}'
             await writer.awrite(json_item.encode())
             
             record_count += 1
@@ -178,17 +179,15 @@ async def serve(writer, filename, logger):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
         await writer.awrite(b"Content-Type: application/json\r\n\r\n")
 
-        current_time = time.localtime(time.time() + UTC_OFFSET)
-        formatted_time = "{:02d}:{:02d}".format(current_time[3], current_time[4])
+        # Send Unix epoch timestamp for consistency with /api/history
+        unix_timestamp = int(time.time()) + MICROPYTHON_EPOCH_OFFSET
         
-        # OPTIMIZED: Use more efficient current temperature retrieval
         current_temps = logger.get_all_current_temps(max_age_minutes=10)
         temp = current_temps.get("a4:c1:38:da:5e:ca")
 
-        # Get total data point count for this sensor
         total_count = logger.get_sensor_data_count("a4:c1:38:da:5e:ca")
 
-        ty = f'{{"ti": "{formatted_time}", "te": "{temp}", "dp": {total_count}}}'
+        ty = f'{{"ts": {unix_timestamp}, "te": "{temp}", "dp": {total_count}}}'
            
         await writer.awrite(ty.encode())
         await writer.drain()

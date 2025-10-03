@@ -43,6 +43,10 @@ class TemperatureLogger:
         self.sensor_names = [None] * self.max_sensors  # Pre-allocated array
         self.last_stored_time_array = [0.0] * self.max_sensors  # Pre-allocated array
         self.detailed_readings_array = [None] * self.max_sensors  # Pre-allocated array
+        self.sensor_record_counts = [0] * self.max_sensors  # Track records per sensor
+        
+        # Per-sensor storage limit (24 hours at 5-min intervals = 288 records)
+        self.max_records_per_sensor = (24 * 60) // min_interval_minutes
         
         # Keep minimal lookup dict for compatibility
         self.name_to_id = {}      # sensor_name -> sensor_id (much smaller now)
@@ -59,6 +63,7 @@ class TemperatureLogger:
         
         print(f"Custom ring buffer initialized: {max_readings} readings, {buffer_size} bytes")
         print(f"Min interval: {min_interval_minutes} minutes per sensor (latest-wins)")
+        print(f"Per-sensor limit: {self.max_records_per_sensor} records (24 hours)")
     
     def _get_or_create_sensor_id(self, sensor_name):
         # Get existing sensor ID or create new one
@@ -82,6 +87,7 @@ class TemperatureLogger:
         Add temperature reading with proper 5-minute spacing:
         - Only store NEW readings if 5+ minutes have passed since last STORAGE
         - Otherwise, update the existing reading in place
+        - Enforce per-sensor limit (24 hours max)
         """
         current_time = time.time()
         sensor_id = self._get_or_create_sensor_id(sensor_name)
@@ -91,14 +97,23 @@ class TemperatureLogger:
         time_since_last_storage = current_time - last_storage_time
         
         if time_since_last_storage >= self.min_interval_seconds:
-            # Store as new reading
-            self._store_new_reading(sensor_name, temperature, current_time)
+            # Check if sensor has reached its 24-hour limit
+            if self.sensor_record_counts[sensor_id] >= self.max_records_per_sensor:
+                # Find and replace oldest record for this sensor
+                self._replace_oldest_record(sensor_name, temperature, current_time)
+            else:
+                # Store as new reading
+                self._store_new_reading(sensor_name, temperature, current_time)
+            
             self.last_stored_time_array[sensor_id] = current_time
         else:
             # Update existing reading in place
             if not self._update_existing_reading(sensor_name, temperature, current_time):
                 # Fallback: store as new if update failed
-                self._store_new_reading(sensor_name, temperature, current_time)
+                if self.sensor_record_counts[sensor_id] >= self.max_records_per_sensor:
+                    self._replace_oldest_record(sensor_name, temperature, current_time)
+                else:
+                    self._store_new_reading(sensor_name, temperature, current_time)
                 self.last_stored_time_array[sensor_id] = current_time
         
         return True
@@ -377,6 +392,27 @@ class TemperatureLogger:
         end_byte = start_byte + self.record_size
         self.buffer[start_byte:end_byte] = data
     
+    def _replace_oldest_record(self, sensor_name, temperature, timestamp):
+        """Find and replace the oldest record for this sensor (enforces 24h limit)"""
+        sensor_id = self.name_to_id[sensor_name]
+        
+        # Find oldest record for this sensor
+        pos = self.tail
+        for i in range(self.count):
+            start_byte = pos * self.record_size
+            record_data = self.buffer[start_byte:start_byte + self.record_size]
+            
+            try:
+                _, stored_sensor_id, _ = struct.unpack('<HBh', record_data)
+                if stored_sensor_id == sensor_id:
+                    # Found oldest record for this sensor - overwrite it
+                    self._overwrite_reading_at_position(pos, sensor_name, temperature, timestamp)
+                    return
+            except:
+                pass
+            
+            pos = (pos + 1) % self.max_readings
+    
     def _store_new_reading(self, sensor_name, temperature, timestamp):
         """Store a completely new reading (append to ring buffer)"""
         sensor_id = self._get_or_create_sensor_id(sensor_name)
@@ -391,6 +427,17 @@ class TemperatureLogger:
         temp_scaled = int(temperature * 100)
         data = struct.pack('<HBh', relative_minutes, sensor_id, temp_scaled)
         
+        # Check if we're about to overwrite a record
+        overwritten_sensor_id = None
+        if self.count >= self.max_readings:
+            # Buffer full - we'll overwrite the tail record
+            start_byte = self.tail * self.record_size
+            record_data = self.buffer[start_byte:start_byte + self.record_size]
+            try:
+                _, overwritten_sensor_id, _ = struct.unpack('<HBh', record_data)
+            except:
+                pass
+        
         # Append to ring buffer
         start_pos = self.head * self.record_size
         end_pos = start_pos + self.record_size
@@ -404,6 +451,12 @@ class TemperatureLogger:
         else:
             # Buffer full, advance tail (overwrite oldest)
             self.tail = (self.tail + 1) % self.max_readings
+            # Decrement count for overwritten sensor
+            if overwritten_sensor_id is not None:
+                self.sensor_record_counts[overwritten_sensor_id] -= 1
+        
+        # Increment count for new sensor record
+        self.sensor_record_counts[sensor_id] += 1
     
     def _reset_time_reference(self):
         """Reset time reference when approaching 45-day limit"""
@@ -637,12 +690,35 @@ class TemperatureLogger:
             'sensor_count': active_sensors,
             'detailed_readings_count': active_detailed,
             'sensor_slots_used': f"{active_sensors}/{self.max_sensors}",
+            'max_records_per_sensor': self.max_records_per_sensor,
             'days_running': round((time.time() - self.start_time) / 86400, 2),
             'is_buffer_full': self.count >= self.max_readings,
             'buffer_wrapped': self.count >= self.max_readings,
             'head_position': self.head,
             'tail_position': self.tail
         }
+    
+    def get_per_sensor_counts(self):
+        """Get record counts for each sensor (for debugging)"""
+        counts = {}
+        for sensor_id in range(self.next_sensor_id):
+            sensor_name = self.sensor_names[sensor_id]
+            if sensor_name:
+                counts[sensor_name] = self.sensor_record_counts[sensor_id]
+        return counts
+    
+    def print_sensor_counts(self):
+        """Print record counts per sensor"""
+        counts = self.get_per_sensor_counts()
+        print(f"\n=== Per-Sensor Record Counts ===")
+        print(f"Max per sensor: {self.max_records_per_sensor} records (24 hours)")
+        print()
+        for sensor_name in sorted(counts.keys()):
+            count = counts[sensor_name]
+            hours = (count / 12) if count > 0 else 0  # 12 readings per hour
+            status = "OK" if count <= self.max_records_per_sensor else "OVER LIMIT"
+            print(f"{sensor_name:<20} {count:>4} records ({hours:>5.1f}h) {status}")
+        print(f"\nTotal sensors: {len(counts)}")
     
     def get_storage_stats(self):
         """Get statistics about storage patterns"""
@@ -694,11 +770,11 @@ class TemperatureLogger:
         print(f"Current storage efficiency: {stats.get('storage_efficiency', '0%')}")
         
         if memory['used_records'] < 50:
-            print(f"⚠️  Very few records stored - system may not be accumulating data over time")
+            print(f"Warning: Very few records stored - system may not be accumulating data over time")
         elif memory['percent_full'] < 10:
-            print(f"✅ Plenty of storage space available")
+            print(f"OK: Plenty of storage space available")
         elif memory['percent_full'] > 90:
-            print(f"⚠️  Buffer nearly full - oldest data being overwritten")
+            print(f"Warning: Buffer nearly full - oldest data being overwritten")
     
     def export_csv(self, count=1000):
         """Export recent data as CSV string - NON-DESTRUCTIVE"""
@@ -719,32 +795,12 @@ class TemperatureLogger:
         return len([name for name in self.sensor_names[:self.next_sensor_id] if name is not None])
     
     def get_sensor_data_count(self, sensor_name):
-        """   Get total count of stored data points for a specific sensor
-        Returns:
-        int: Number of data points stored for this sensor
-        """
+        """Get total count of stored data points for a specific sensor"""
         if sensor_name not in self.name_to_id:
             return 0
-    
+        
         sensor_id = self.name_to_id[sensor_name]
-        count = 0
-        
-        # Scan the entire ring buffer to count records for this sensor
-        pos = self.tail
-        for i in range(self.count):
-            start_byte = pos * self.record_size
-            record_data = self.buffer[start_byte:start_byte + self.record_size]
-            
-            try:
-                _, stored_sensor_id, _ = struct.unpack('<HBh', record_data)
-                if stored_sensor_id == sensor_id:
-                    count += 1
-            except:
-                pass
-            
-            pos = (pos + 1) % self.max_readings
-        
-        return count
+        return self.sensor_record_counts[sensor_id]
     
     def stream_history_reverse(self, sensor_name, max_readings=288):
         # Stream sensor history in reverse chronological order to avoid having to allocate a buffer for sorting
@@ -752,6 +808,7 @@ class TemperatureLogger:
         if sensor_name not in self.name_to_id:
             return
         
+        sensor_id = self.name_to_id[sensor_name]
         yielded_count = 0
         pos = (self.head - 1) % self.max_readings
         
@@ -784,6 +841,7 @@ class TemperatureLogger:
         for i in range(self.next_sensor_id):
             self.last_stored_time_array[i] = 0.0
             self.detailed_readings_array[i] = None
+            self.sensor_record_counts[i] = 0
         # Clear legacy dicts for compatibility
         self.last_stored_time.clear()
         self.last_detailed_readings.clear()

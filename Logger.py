@@ -87,7 +87,6 @@ class TemperatureLogger:
         Add temperature reading with proper 5-minute spacing:
         - Only store NEW readings if 5+ minutes have passed since last STORAGE
         - Otherwise, update the existing reading in place
-        - Enforce per-sensor limit (24 hours max)
         """
         current_time = time.time()
         sensor_id = self._get_or_create_sensor_id(sensor_name)
@@ -97,23 +96,14 @@ class TemperatureLogger:
         time_since_last_storage = current_time - last_storage_time
         
         if time_since_last_storage >= self.min_interval_seconds:
-            # Check if sensor has reached its 24-hour limit
-            if self.sensor_record_counts[sensor_id] >= self.max_records_per_sensor:
-                # Find and replace oldest record for this sensor
-                self._replace_oldest_record(sensor_name, temperature, current_time)
-            else:
-                # Store as new reading
-                self._store_new_reading(sensor_name, temperature, current_time)
-            
+            # Store as new reading (global ring buffer handles eviction)
+            self._store_new_reading(sensor_name, temperature, current_time)
             self.last_stored_time_array[sensor_id] = current_time
         else:
             # Update existing reading in place
             if not self._update_existing_reading(sensor_name, temperature, current_time):
                 # Fallback: store as new if update failed
-                if self.sensor_record_counts[sensor_id] >= self.max_records_per_sensor:
-                    self._replace_oldest_record(sensor_name, temperature, current_time)
-                else:
-                    self._store_new_reading(sensor_name, temperature, current_time)
+                self._store_new_reading(sensor_name, temperature, current_time)
                 self.last_stored_time_array[sensor_id] = current_time
         
         return True

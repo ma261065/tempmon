@@ -49,13 +49,14 @@ def GetData():
     l = list()
     now = time.ticks_ms()
 
-    for sensor, info in sensor_data.items():
-        # If the last updated is more than a hour ago, delete this record
-        if time.ticks_diff(now, info['last_updated']) > 60 * 60 * 1000:
-            print(f"Removing sensor {sensor} - {now} {info['last_updated']}")
-            del sensor_data[sensor]
-            continue
+    # Collect stale sensors first, then delete (avoid modifying dict during iteration)
+    stale = [sensor for sensor, info in sensor_data.items()
+             if time.ticks_diff(now, info['last_updated']) > 60 * 60 * 1000]
+    for sensor in stale:
+        print(f"Removing sensor {sensor} - {now} {sensor_data[sensor]['last_updated']}")
+        del sensor_data[sensor]
 
+    for sensor, info in sensor_data.items():
         # Build a list of tuples with the sensor data
         t = tuple((sensor, info['name'], info['temperature'], info['humidity'], info['battery'], info['rssi'], info['voltage'], info['power'], info['last_updated']))
         l.append(t)

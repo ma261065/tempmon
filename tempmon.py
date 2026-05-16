@@ -35,37 +35,31 @@ TOPIC = 'tele/BLESensor/SENSOR'
 #    tsf.set()  # Signal the flag
 
 async def scan_data_handler(result):
-    #print('.', end='')
-    #print(f"Device found: {result.device}  {result.device.addr} {result.name()} - {result.adv_data}, RSSI: {result.rssi}")
+    try:
+        if result.device.addr[0] == 0xa4:
+            address = hexlify(result.device.addr, ":").decode()
+            name = result.name()
 
-    if result.device.addr[0] == 0xa4:
-        #print(f"Device found: {result.device}  {result.device.addr} {result.name()} - {result.adv_data}, RSSI: {result.rssi}")
-        #print(hexlify(result.adv_data).decode(), len(result.adv_data))
+            battery = temperature = humidity = power = voltage = None
 
-        #now = time.localtime()
-        address = hexlify(result.device.addr, ":").decode()
-        name = result.name()
+            if result.adv_data is None or len(result.adv_data) == 0:
+                print(f"{address} - Device Name: '{result.name()}'")
+                return
+            else:
+                ret = parse_adv_data(result.adv_data)
 
-        battery = temperature = humidity = power = voltage = None
+            if ret is None:
+                print(f"Ignoring {address}, {result.name()} = {result.adv_data} received data not in BTHome v2 format")
+                return
+            else:
+                battery, temperature, humidity, power, voltage = ret
+                print(f"{address} - Name: {name}, Battery:{battery}, Temperature:{temperature}, Humidity:{humidity}, Power:{power}, Voltage:{voltage} RSSI:{result.rssi}")
 
-        #ret = None
-        
-        if result.adv_data is None or len(result.adv_data) == 0:
-            print(f"{address} - Device Name: '{result.name()}'")
-            return
-        else:
-            ret = parse_adv_data(result.adv_data)
-
-        if ret is None:
-            print(f"Ignoring {address}, {result.name()} = {result.adv_data} received data not in BTHome v2 format")
-            return
-        else:
-            battery, temperature, humidity, power, voltage = ret
-            print(f"{address} - Name: {name}, Battery:{battery}, Temperature:{temperature}, Humidity:{humidity}, Power:{power}, Voltage:{voltage} RSSI:{result.rssi}")
-
-        await UpdateData(address, name, temperature, humidity, battery, result.rssi, voltage, power)
-        if name is not None and temperature is not None:
-            await logger.add_detailed_reading(sensor_name=address, temperature=temperature, humidity=humidity, battery_level=battery, rssi=result.rssi, voltage=voltage, power=power)
+            await UpdateData(address, name, temperature, humidity, battery, result.rssi, voltage, power)
+            if name is not None and temperature is not None:
+                await logger.add_detailed_reading(sensor_name=address, temperature=temperature, humidity=humidity, battery_level=battery, rssi=result.rssi, voltage=voltage, power=power)
+    except Exception as e:
+        print(f"Error handling scan result: {e}")
 
 '''def handle_scan(ev, data):
     if ev == _IRQ_SCAN_RESULT:
@@ -150,18 +144,32 @@ def parse_adv_data(adv_data: bytes):
         if typ == 0x01:  # Battery
             battery = int.from_bytes(adv_data[start:start+1], 'little', True)
             start += 1
-        if typ == 0x02:  # Temperature
+        elif typ == 0x02:  # Temperature
             temperature = int.from_bytes(adv_data[start: start+2], 'little', True) / 100
             start += 2
-        if typ == 0x03:  # Humidity
+        elif typ == 0x03:  # Humidity
             humidity = int.from_bytes(adv_data[start:start+2], 'little', True) / 100
             start += 2
-        if typ == 0x10:  # Power (On/Off', True)
+        elif typ == 0x10:  # Power (On/Off)
             power = int.from_bytes(adv_data[start:start+1], 'little', True)
             start += 1
-        if typ == 0x0c:  # Voltage
+        elif typ == 0x0c:  # Voltage
             voltage = int.from_bytes(adv_data[start:start+2], 'little', True) / 1000
             start += 2
+        else:
+            # Skip unknown BTHome types using known data sizes
+            # See https://bthome.io/format/
+            BTHOME_SIZES = {0x00: 1, 0x04: 3, 0x05: 3, 0x06: 2, 0x07: 2,
+                            0x08: 2, 0x09: 1, 0x0a: 3, 0x0b: 3, 0x0d: 2,
+                            0x0e: 2, 0x0f: 1, 0x11: 1, 0x12: 2, 0x13: 2,
+                            0x14: 2, 0x15: 1, 0x16: 1, 0x17: 2, 0x18: 2,
+                            0x19: 2, 0x1a: 2, 0x1b: 2, 0x1c: 2}
+            skip = BTHOME_SIZES.get(typ)
+            if skip is not None:
+                start += skip
+            else:
+                print(f"Unknown BTHome type: 0x{typ:02x} at offset {start}")
+                break
 
     return battery, temperature, humidity, power, voltage
 
@@ -176,11 +184,17 @@ async def send_mqtt():
     while True:
         gc.collect()
         await asyncio.sleep(60)
+        gc.collect()
 
         try:
             # Only connect if not already connected
             if not mqtt_connected:
-                await mqtt.connect()
+                result = await mqtt.connect()
+                if result is None:
+                    print("MQTT connect failed, will retry")
+                    mqtt_connected = False
+                    await asyncio.sleep(5)
+                    continue
                 mqtt_connected = True
                 print("Connected to MQTT Server")
             else:
@@ -188,44 +202,18 @@ async def send_mqtt():
 
             now = time.localtime(time.time() + 3600 * 10) # Timezone is UTC+10
             print(f"Time: {now[0]}-{now[1]:02}-{now[2]:02} {now[3]:02}:{now[4]:02}:{now[5]:02}")
+            gc.collect()
             print(f"Free memory: {gc.mem_free()}")
             micropython.mem_info()
-
-
-            print(logger.get_memory_info())
-            print(logger.get_all_current_temps())
 
             SensorData = GetData()
             
             for Sensor in SensorData:
-                '''ID = Sensor[0]
-                Name = Sensor[1]
-                Temperature = Sensor[2]
-                Humidity = Sensor[3]
-                Battery = Sensor[4]
-                RSSI = Sensor[5]
-                Voltage = Sensor[6]
-                Power = Sensor[7]
-                LastUpdated = Sensor[8]'''
                 ID, Name, Temperature, Humidity, Battery, RSSI, Voltage, Power, LastUpdated = Sensor
 
-                print("-" * 20)
-                print(f"Sensor ID: {ID}")
-                print(f"Name: {Name}")
-                print(f"Temperature: {Temperature}°C")
-                print(f"Humidity: {Humidity}%")
-                print(f"Battery Level: {Battery}%")
-                print(f"RSSI: {RSSI} dBm")
-                print(f"Voltage: {Voltage}V")
-                print(f"Power: {Power}")
-                print(f"Last Updated: {time.ticks_ms()} - {LastUpdated} = {int(time.ticks_diff(time.ticks_ms(), LastUpdated) / 1000)} sec(s) ago")
-                
+                print(f"{ID} {Name} T:{Temperature} H:{Humidity} B:{Battery}% RSSI:{RSSI} V:{Voltage} P:{Power} age:{int(time.ticks_diff(time.ticks_ms(), LastUpdated) / 1000)}s")
 
                 if Temperature != 0 and Temperature is not None and Name is not None:
-                    print("Sending MQTT message")
-                    #try:
-                        #await mqtt.connect()
-                        #print("Connected to MQTT Server")
                     message = f'{{"Time":"{now[0]}-{now[1]:02}-{now[2]:02}T{now[3]:02}:{now[4]:02}:{now[5]:02}","{Name}":{{"mac":"{ID}","Temperature":{Temperature},"Humidity":{Humidity},"DewPoint":16.1,"Battery":{Battery},"RSSI":{RSSI}}},"TempUnit":"C"}}'
                     await mqtt.publish(topic=TOPIC, msg=message, qos=0)
                     await asyncio.sleep_ms(10)  # Small delay between publishes
@@ -262,9 +250,8 @@ async def scan_ble():
             active=True            # Active scan mode
         ) as scanner:
             async for result in scanner:
-                #print('<', end='') #result.device.addr)
                 await scan_data_handler(result)
-                #print('>', end='')
+        await asyncio.sleep_ms(100)  # Brief yield between scan cycles
 
 '''def StartBTScan():
     # Set up Bluetooth low-energy scan

@@ -83,8 +83,18 @@ class MQTTClient:
             if resp[3] != 0:
                 raise MQTTException(resp[3])
             return resp[2] & 1
-        except:
-            print("Error Connecting")
+        except Exception as e:
+            print(f"Error Connecting: {e}")
+            # Clean up socket if connection was partially established
+            if self.writer is not None:
+                try:
+                    self.writer.close()
+                    await self.writer.wait_closed()
+                except:
+                    pass
+                self.writer = None
+                self.reader = None
+            return None
         else:
             print("Connected")
     

@@ -553,22 +553,11 @@
                         console.log("INDEX OUT OF RANGE:", dataIndex);
                     }
                     
-                    // Server-authoritative sync check
-                    if (newData.dp !== undefined) {
-                        serverDataCount = newData.dp;
-                        
-                        // Simple comparison: if server has more data points, fetch history
-                        const localCount = dataPoints.size;
-                        if (serverDataCount > localCount) {
-                            const now = dayjs();
-                            const shouldFetch = !lastHistoricalFetch || now.diff(lastHistoricalFetch, 'minutes') > 2;
-                            
-                            if (shouldFetch) {
-                                console.log(`Server has ${serverDataCount} data points, we have ${localCount} - fetching history`);
-                                lastHistoricalFetch = now;
-                                fetchHistoricalData();
-                            }
-                        }
+                    // Server-authoritative sync: fetch history on first poll or if we have no data
+                    if (dataPoints.size === 0 || (!lastHistoricalFetch)) {
+                        const now = dayjs();
+                        lastHistoricalFetch = now;
+                        fetchHistoricalData();
                     }
                     
                     updateDataStatus();

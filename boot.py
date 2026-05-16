@@ -1,6 +1,7 @@
 import webrepl
 import esp32
 import network
+import time
 from machine import Pin
 
 def connect_to_WiFi():
@@ -12,12 +13,17 @@ def connect_to_WiFi():
     #WIFI_ANT_CONFIG.value(1)
 
     # Get the access point and password from non-volatile storage
-    nvs = esp32.NVS("keys")
-    buf = bytearray(32)
-    nvs.get_blob("ap", buf)
-    ap = buf.rstrip(b'\x00').decode('utf-8')
-    nvs.get_blob("pw", buf)
-    pw = buf.rstrip(b'\x00').decode('utf-8')
+    try:
+        nvs = esp32.NVS("keys")
+        buf = bytearray(32)
+        nvs.get_blob("ap", buf)
+        ap = buf.rstrip(b'\x00').decode('utf-8')
+        buf[:] = b'\x00' * 32  # Clear before reuse
+        nvs.get_blob("pw", buf)
+        pw = buf.rstrip(b'\x00').decode('utf-8')
+    except OSError as e:
+        print(f"Failed to read WiFi credentials from NVS: {e}")
+        return
     
     network.hostname("tempmon")
     sta_if = network.WLAN(network.STA_IF)
@@ -31,8 +37,12 @@ def connect_to_WiFi():
         #sta_if.config(dhcp_hostname = host)
         sta_if.connect(ap, pw)
 
+        timeout = 15
+        start = time.time()
         while not sta_if.isconnected():
-            pass
+            if time.time() - start > timeout:
+                print("WiFi connection timed out")
+                break
 
     #host = sta_if.config('dhcp_hostname')
     print('Wifi connected as {}/{}, net={}, gw={}, dns={}'.format(network.hostname(), *sta_if.ifconfig()))

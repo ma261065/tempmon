@@ -185,9 +185,7 @@ async def serve(writer, filename, logger):
         current_temps = logger.get_all_current_temps(max_age_minutes=10)
         temp = current_temps.get("a4:c1:38:da:5e:ca")
 
-        total_count = logger.get_sensor_data_count("a4:c1:38:da:5e:ca")
-
-        ty = f'{{"ts": {unix_timestamp}, "te": "{temp}", "dp": {total_count}}}'
+        ty = f'{{"ts": {unix_timestamp}, "te": "{temp}"}}'
            
         await writer.awrite(ty.encode())
         await writer.drain()
@@ -237,6 +235,7 @@ async def serve(writer, filename, logger):
 
 async def handle(reader, writer, logger):
     print("***********************************************", reader)
+    filename = None
     try:
         while True:
             items = await asyncio.wait_for(reader.readline(), timeout=5)
@@ -252,7 +251,8 @@ async def handle(reader, writer, logger):
             #print(len(items), items)
 
             if len(items) == 0:
-                await serve(writer, filename, logger)
+                if filename is not None:
+                    await serve(writer, filename, logger)
                 break
             
     except asyncio.TimeoutError:
@@ -273,5 +273,6 @@ async def start_webserver(logger):
     server = await asyncio.start_server(
         lambda r, w: handle(r, w, logger), '0.0.0.0', 80
     )
-    # No need for serve_forever; let the event loop manage the server
-    return server  # Keep the server alive by returning it
+    # Keep this task alive so the server reference isn't garbage collected
+    while True:
+        await asyncio.sleep(3600)

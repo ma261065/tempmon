@@ -61,9 +61,6 @@ async def index(mywriter):
     #    else:
     #        print("File Not Found")
     #await send_file(mywriter, "settings.html")
-    print("Closing connection", writer)
-    await writer.aclose()
-    await writer.wait_closed()
 
 async def doodle(writer, filename):
     await writer.awrite(b"HTTP/1.1 200 OK\r\n\r\n")
@@ -121,7 +118,8 @@ async def serve(writer, filename, logger):
     
     if filename.startswith("/api/status"):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
-        await writer.awrite(b"Content-Type: application/json\r\n\r\n")
+        await writer.awrite(b"Content-Type: application/json\r\n")
+        await writer.awrite(b"Connection: close\r\n\r\n")
 
         time_str, uptime_str = get_time()
 
@@ -133,15 +131,12 @@ async def serve(writer, filename, logger):
         await writer.awrite(json.dumps(_temp_dict).encode())
         
         await writer.drain()
-
-        print("Closing connection", writer)
-        await writer.aclose()
-        await writer.wait_closed()
         return
     
     if filename.startswith("/api/history"):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
-        await writer.awrite(b"Content-Type: application/json\r\n\r\n")
+        await writer.awrite(b"Content-Type: application/json\r\n")
+        await writer.awrite(b"Connection: close\r\n\r\n")
 
         # TRUE STREAMING: Process records one at a time with ZERO intermediate lists
         await writer.awrite(b'[')
@@ -169,15 +164,12 @@ async def serve(writer, filename, logger):
         
         await writer.awrite(b']')
         await writer.drain()
-
-        print("Closing connection", writer)
-        await writer.aclose()
-        await writer.wait_closed()
         return
 
     if filename.startswith("/tempdata"):
         await writer.awrite(b"HTTP/1.1 200 OK\r\n")
-        await writer.awrite(b"Content-Type: application/json\r\n\r\n")
+        await writer.awrite(b"Content-Type: application/json\r\n")
+        await writer.awrite(b"Connection: close\r\n\r\n")
 
         # Send Unix epoch timestamp for consistency with /api/history
         unix_timestamp = int(time.time()) + MICROPYTHON_EPOCH_OFFSET
@@ -189,10 +181,6 @@ async def serve(writer, filename, logger):
            
         await writer.awrite(ty.encode())
         await writer.drain()
-
-        print("Closing connection", writer)
-        await writer.aclose()
-        await writer.wait_closed()
         return
 
     #await doodle(writer, filename)
@@ -200,6 +188,7 @@ async def serve(writer, filename, logger):
     try:
         with open(f"./assets/{filename}", 'rb') as f:
             await writer.awrite(b"HTTP/1.1 200 OK\r\n")
+            await writer.awrite(b"Connection: close\r\n")
             
             if filename.endswith('.svg'):
                 await writer.awrite(b"Content-Type: image/svg+xml\r\n")
@@ -220,18 +209,12 @@ async def serve(writer, filename, logger):
                     await writer.awrite(_file_buffer[:bytes_read])
                 await writer.drain()
     except OSError as e:
-        if e.args[0] != uerrno.ENOENT:
-            print("Error:", e.args[0])
-        else:
+        if e.args and e.args[0] == uerrno.ENOENT:
             print(filename, "not found")
-        await writer.aclose()
-        await writer.wait_closed()
-        return
+            return
+        raise
 
     print("Sent", filename)
-    print("Closing connection", writer)
-    await writer.aclose()
-    await writer.wait_closed()
 
 async def handle(reader, writer, logger):
     print("***********************************************", reader)
@@ -256,12 +239,18 @@ async def handle(reader, writer, logger):
                 break
             
     except asyncio.TimeoutError:
-        print("Timeout occurred. Closing connection", reader)
-        await writer.aclose()
-        await writer.wait_closed()
+        print("Request timed out")
+    except OSError as e:
+        if not e.args or e.args[0] != uerrno.ECONNRESET:
+            print(f"Socket error: {e}")
     except Exception as e:
         print(f"Error: {e}")
     finally:
+        try:
+            await writer.aclose()
+            await writer.wait_closed()
+        except OSError:
+            pass
         print("Finished")
         
 # Keeping original commented function

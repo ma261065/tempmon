@@ -56,7 +56,7 @@ async def scan_data_handler(result):
                 print(f"{address} - Name: {name}, Battery:{battery}, Temperature:{temperature}, Humidity:{humidity}, Power:{power}, Voltage:{voltage} RSSI:{result.rssi}")
 
             await UpdateData(address, name, temperature, humidity, battery, result.rssi, voltage, power)
-            if name is not None and temperature is not None:
+            if temperature is not None:
                 await logger.add_detailed_reading(sensor_name=address, temperature=temperature, humidity=humidity, battery_level=battery, rssi=result.rssi, voltage=voltage, power=power)
     except Exception as e:
         print(f"Error handling scan result: {e}")

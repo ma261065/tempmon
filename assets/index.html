@@ -292,6 +292,7 @@
             let dataPoints = new Map(); // timestamp -> {value, dayjs_obj}
             let serverDataCount = 0; // Track server's total data points
             let lastHistoricalFetch = null; // Prevent rapid repeated fetches
+            let historyFetchInProgress = false;
 
             // Update status display
             function updateDataStatus() {
@@ -468,15 +469,19 @@
                 console.log("=== PROCESSING NEW DATA ===", item);
                 try {
                     const newData = JSON.parse(item);
+                    const serverCountChanged = newData.dp !== undefined && newData.dp !== serverDataCount;
+                    if (newData.dp !== undefined) {
+                        serverDataCount = newData.dp;
+                    }
                     
                     // Skip invalid temperature values
                     if (newData.te === "None" || newData.te === null || newData.te === undefined || newData.te === "") {
                         console.log("Temperature value is invalid:", newData.te, "- skipping");
                         
-                        if (newData.dp !== undefined) {
-                            serverDataCount = newData.dp;
-                            updateDataStatus();
+                        if (serverCountChanged || !lastHistoricalFetch) {
+                            fetchHistoricalData();
                         }
+                        updateDataStatus();
                         return;
                     }
                     
@@ -553,15 +558,14 @@
                         console.log("INDEX OUT OF RANGE:", dataIndex);
                     }
                     
-                    // Server-authoritative sync: fetch history on first poll or if we have no data
-                    if (dataPoints.size === 0 || (!lastHistoricalFetch)) {
-                        const now = dayjs();
-                        lastHistoricalFetch = now;
+                    // Server-authoritative sync: refresh whenever stored history changes.
+                    if (serverCountChanged || !lastHistoricalFetch) {
                         fetchHistoricalData();
                     }
                     
                     updateDataStatus();
                     
+                    lastHistoricalFetch = dayjs();
                 } catch (error) {
                     console.error("Error processing data:", error);
                 }
@@ -569,6 +573,8 @@
 
             // Fetch and process historical data from server
             async function fetchHistoricalData() {
+                if (historyFetchInProgress) return;
+                historyFetchInProgress = true;
                 console.log("=== FETCHING HISTORICAL DATA ===");
                 try {
                     const response = await fetch("/api/history");
@@ -668,6 +674,8 @@
                     
                 } catch (err) {
                     console.error("Failed to fetch historical data:", err);
+                } finally {
+                    historyFetchInProgress = false;
                 }
             }
 
@@ -696,6 +704,11 @@
                                 element.textContent = data[key];
                             }
                         });
+                        if (data.dp !== undefined && data.dp !== serverDataCount) {
+                            serverDataCount = data.dp;
+                            updateDataStatus();
+                            fetchHistoricalData();
+                        }
                 } catch (err) {
                     console.error("Status request failed:", err);
                 }

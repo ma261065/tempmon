@@ -8,6 +8,7 @@ import json
 
 UTC_OFFSET = 10 * 60 * 60
 MICROPYTHON_EPOCH_OFFSET = 946684800  # Seconds between Unix epoch (1970) and MicroPython epoch (2000)
+SENSOR_ADDRESS = "a4:c1:38:da:5e:ca"
 
 # OPTIMIZED: Pre-allocated buffers to avoid frequent allocations
 _file_buffer = bytearray(512)  # For file reading (larger chunks than original 64 bytes)
@@ -127,6 +128,7 @@ async def serve(writer, filename, logger):
         _temp_dict.clear()
         _temp_dict["time"] = time_str
         _temp_dict["uptime"] = uptime_str
+        _temp_dict["dp"] = logger.get_sensor_data_count(SENSOR_ADDRESS)
 
         await writer.awrite(json.dumps(_temp_dict).encode())
         
@@ -145,7 +147,7 @@ async def serve(writer, filename, logger):
         record_count = 0
         
         # Send Unix epoch timestamps - client expects seconds since 1970
-        for timestamp_since_epoch, temperature in logger.stream_history_reverse("a4:c1:38:da:5e:ca", 24*12):
+        for timestamp_since_epoch, temperature in logger.stream_history_reverse(SENSOR_ADDRESS, 24*12):
             if not first_item:
                 await writer.awrite(b',')
             first_item = False
@@ -175,9 +177,10 @@ async def serve(writer, filename, logger):
         unix_timestamp = int(time.time()) + MICROPYTHON_EPOCH_OFFSET
         
         current_temps = logger.get_all_current_temps(max_age_minutes=10)
-        temp = current_temps.get("a4:c1:38:da:5e:ca")
+        temp = current_temps.get(SENSOR_ADDRESS)
+        data_point_count = logger.get_sensor_data_count(SENSOR_ADDRESS)
 
-        ty = f'{{"ts": {unix_timestamp}, "te": "{temp}"}}'
+        ty = f'{{"ts": {unix_timestamp}, "te": "{temp}", "dp": {data_point_count}}}'
            
         await writer.awrite(ty.encode())
         await writer.drain()

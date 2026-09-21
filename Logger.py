@@ -89,6 +89,8 @@ class TemperatureLogger:
         - Otherwise, update the existing reading in place
         """
         current_time = time.time()
+        if int((current_time - self.start_time) / 60) > 65535:
+            self._rebase_time_reference(current_time)
         sensor_id = self._get_or_create_sensor_id(sensor_name)
         
         # Check when we last STORED a reading for this sensor (use array)
@@ -369,10 +371,6 @@ class TemperatureLogger:
         
         # Calculate relative time
         relative_minutes = int((timestamp - self.start_time) / 60)
-        if relative_minutes > 65535:
-            self._reset_time_reference()
-            relative_minutes = 0
-        
         # Pack new data
         temp_scaled = int(temperature * 100)
         data = struct.pack('<HBh', relative_minutes, sensor_id, temp_scaled)
@@ -382,26 +380,38 @@ class TemperatureLogger:
         end_byte = start_byte + self.record_size
         self.buffer[start_byte:end_byte] = data
     
-    def _replace_oldest_record(self, sensor_name, temperature, timestamp):
-        """Find and replace the oldest record for this sensor (enforces 24h limit)"""
+    def _remove_oldest_record(self, sensor_name):
+        """Remove the oldest record for a sensor while preserving ring order."""
         sensor_id = self.name_to_id[sensor_name]
-        
-        # Find oldest record for this sensor
+
         pos = self.tail
         for i in range(self.count):
             start_byte = pos * self.record_size
             record_data = self.buffer[start_byte:start_byte + self.record_size]
-            
-            try:
-                _, stored_sensor_id, _ = struct.unpack('<HBh', record_data)
-                if stored_sensor_id == sensor_id:
-                    # Found oldest record for this sensor - overwrite it
-                    self._overwrite_reading_at_position(pos, sensor_name, temperature, timestamp)
-                    return
-            except:
-                pass
-            
+
+            _, stored_sensor_id, _ = struct.unpack('<HBh', record_data)
+            if stored_sensor_id == sensor_id:
+                current = pos
+                next_pos = (current + 1) % self.max_readings
+                while next_pos != self.head:
+                    source = next_pos * self.record_size
+                    target = current * self.record_size
+                    self.buffer[target:target + self.record_size] = \
+                        self.buffer[source:source + self.record_size]
+                    current = next_pos
+                    next_pos = (next_pos + 1) % self.max_readings
+
+                self.head = (self.head - 1) % self.max_readings
+                clear_start = self.head * self.record_size
+                self.buffer[clear_start:clear_start + self.record_size] = \
+                    b'\x00' * self.record_size
+                self.count -= 1
+                self.sensor_record_counts[sensor_id] -= 1
+                return
+
             pos = (pos + 1) % self.max_readings
+
+        raise RuntimeError("Sensor record count does not match ring buffer")
     
     def _store_new_reading(self, sensor_name, temperature, timestamp):
         """Store a completely new reading (append to ring buffer)"""
@@ -409,13 +419,12 @@ class TemperatureLogger:
         
         # Calculate relative time
         relative_minutes = int((timestamp - self.start_time) / 60)
-        if relative_minutes > 65535:
-            self._reset_time_reference()
-            relative_minutes = 0
-        
         # Pack data
         temp_scaled = int(temperature * 100)
         data = struct.pack('<HBh', relative_minutes, sensor_id, temp_scaled)
+
+        if self.sensor_record_counts[sensor_id] >= self.max_records_per_sensor:
+            self._remove_oldest_record(sensor_name)
         
         # Check if we're about to overwrite a record
         overwritten_sensor_id = None
@@ -447,11 +456,31 @@ class TemperatureLogger:
         
         # Increment count for new sensor record
         self.sensor_record_counts[sensor_id] += 1
-    
-    def _reset_time_reference(self):
-        """Reset time reference when approaching 45-day limit"""
-        print("Resetting time reference (45-day limit reached)")
-        self.start_time = time.time()
+
+    def _rebase_time_reference(self, timestamp):
+        """Keep the last 24 hours and rebase offsets without growing the buffer."""
+        offset_minutes = int((timestamp - self.start_time) / 60) - 24 * 60
+        read_pos = write_pos = self.tail
+        retained_count = 0
+        for sensor_id in range(self.next_sensor_id):
+            self.sensor_record_counts[sensor_id] = 0
+
+        # Compact in ring order before changing the epoch, preserving absolute times.
+        for _ in range(self.count):
+            start = read_pos * self.record_size
+            minutes, sensor_id, temperature = struct.unpack_from('<HBh', self.buffer, start)
+            if minutes >= offset_minutes:
+                struct.pack_into('<HBh', self.buffer, write_pos * self.record_size,
+                                 minutes - offset_minutes, sensor_id, temperature)
+                write_pos = (write_pos + 1) % self.max_readings
+                retained_count += 1
+                self.sensor_record_counts[sensor_id] += 1
+            read_pos = (read_pos + 1) % self.max_readings
+
+        self.head = write_pos
+        self.count = retained_count
+        self.start_time += offset_minutes * 60
+        print(f"Rebased history timestamps; retained {retained_count} readings")
     
     def _parse_record(self, record_data):
         """Parse a single record from binary data"""

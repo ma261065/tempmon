@@ -10,6 +10,8 @@ import machine, network, socket, ntptime, time
 import asyncio
 import sys
 import random
+import json
+import math
 from Data import UpdateData, GetData, OpenDB, CloseDB, DumpDB
 from umqttsimple import MQTTClient
 import aioble
@@ -23,6 +25,7 @@ import micropython
 #_IRQ_SCAN_RESULT = const(5)
 #_IRQ_SCAN_DONE = const(6)
 TOPIC = 'tele/BLESensor/SENSOR'
+mqtt = None
 
 #my_timer = machine.Timer(0)
 
@@ -213,8 +216,26 @@ async def send_mqtt():
 
                 print(f"{ID} {Name} T:{Temperature} H:{Humidity} B:{Battery}% RSSI:{RSSI} V:{Voltage} P:{Power} age:{int(time.ticks_diff(time.ticks_ms(), LastUpdated) / 1000)}s")
 
-                if Temperature != 0 and Temperature is not None and Name is not None:
-                    message = f'{{"Time":"{now[0]}-{now[1]:02}-{now[2]:02}T{now[3]:02}:{now[4]:02}:{now[5]:02}","{Name}":{{"mac":"{ID}","Temperature":{Temperature},"Humidity":{Humidity},"DewPoint":16.1,"Battery":{Battery},"RSSI":{RSSI}}},"TempUnit":"C"}}'
+                if Temperature is not None and Name is not None:
+                    dew_point = None
+                    if Humidity is not None and Humidity > 0:
+                        alpha = math.log(Humidity / 100) + \
+                            (17.62 * Temperature) / (243.12 + Temperature)
+                        dew_point = round(243.12 * alpha / (17.62 - alpha), 2)
+
+                    sensor_payload = {
+                        "mac": ID,
+                        "Temperature": Temperature,
+                        "Humidity": Humidity,
+                        "DewPoint": dew_point,
+                        "Battery": Battery,
+                        "RSSI": RSSI
+                    }
+                    message = json.dumps({
+                        "Time": f"{now[0]}-{now[1]:02}-{now[2]:02}T{now[3]:02}:{now[4]:02}:{now[5]:02}",
+                        Name: sensor_payload,
+                        "TempUnit": "C"
+                    })
                     await mqtt.publish(topic=TOPIC, msg=message, qos=0)
                     await asyncio.sleep_ms(10)  # Small delay between publishes
                         #await asyncio.sleep_ms(100) 
@@ -268,7 +289,10 @@ async def scan_ble():
 def exit_handler():
     print('Application exiting')
     if mqtt is not None:
-        mqtt.disconnect()
+        try:
+            asyncio.get_event_loop().run_until_complete(mqtt.disconnect())
+        except Exception as e:
+            print(f"Error disconnecting from MQTT: {e}")
     #my_timer.deinit()
     #BLE().active(False)
     #CloseDB()

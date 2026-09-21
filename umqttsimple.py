@@ -100,14 +100,19 @@ class MQTTClient:
     
 
     async def disconnect(self):
+        if self.writer is None:
+            return
+
         try:
             self.writer.write(b"\xe0\0")
             await self.writer.drain()
-        except:
-            print("Error disconnecting")
+        except Exception as e:
+            print(f"Error disconnecting: {e}")
         finally:
             self.writer.close()
             await self.writer.wait_closed()
+            self.writer = None
+            self.reader = None
 
    
     async def publish(self, topic, msg, retain=False, qos=0):

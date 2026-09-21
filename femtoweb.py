@@ -214,6 +214,13 @@ async def serve(writer, filename, logger):
     except OSError as e:
         if e.args and e.args[0] == uerrno.ENOENT:
             print(filename, "not found")
+            body = b"404 Not Found"
+            await writer.awrite(b"HTTP/1.1 404 Not Found\r\n")
+            await writer.awrite(b"Content-Type: text/plain\r\n")
+            await writer.awrite(b"Content-Length: 13\r\n")
+            await writer.awrite(b"Connection: close\r\n\r\n")
+            await writer.awrite(body)
+            await writer.drain()
             return
         raise
 
